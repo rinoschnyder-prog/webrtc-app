@@ -5,20 +5,140 @@
     <title>WebRTC Video Chat</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #202124; color: #ffffff; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #video-container { position: relative; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
-        #remoteVideo { width: 100%; height: 100%; object-fit: cover; }
-        #localVideo { position: absolute; bottom: 20px; right: 20px; width: 25%; max-width: 200px; height: auto; border: 2px solid #fff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
-        #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.5); padding: 10px 20px; border-radius: 50px; display: flex; gap: 15px; }
-        .control-button { background-color: #3c4043; color: white; border: none; width: 50px; height: 50px; border-radius: 50%; font-size: 24px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.2s; }
-        .control-button:hover { background-color: #5f6368; }
-        .control-button:disabled { background-color: #282a2d; cursor: not-allowed; }
-        #callButton { background-color: #33a853; }
-        #callButton.hangup { background-color: #ea4335; }
-        #initial-view { text-align: center; }
-        #initial-view h1 { font-weight: 300; }
-        #createRoomButton { padding: 15px 30px; font-size: 18px; border-radius: 8px; border: none; background-color: #8ab4f8; color: #202124; cursor: pointer; z-index: 10; }
-    </style>
+    /* 基本設定 */
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #202124;
+        color: #ffffff;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        /* ▼▼▼ 画面がはみ出さないように設定を追加 ▼▼▼ */
+        overflow: hidden;
+    }
+
+    /* ビデオ全体のコンテナ */
+    #video-container {
+        position: relative;
+        width: 100vw;   /* 画面の幅いっぱいに広がる */
+        height: 100vh;  /* 画面の高さっぱいに広がる */
+        overflow: hidden;
+        background-color: #000;
+    }
+
+    /* 相手のビデオ (メイン) */
+    #remoteVideo {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    /* 自分のビデオ (ワイプ) */
+    #localVideo {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        /* ▼▼▼ 画面幅に応じてサイズが変わるように変更 ▼▼▼ */
+        width: 25vw; /* 画面幅の25% */
+        max-width: 200px;
+        min-width: 100px; /* 最小幅も指定 */
+        height: auto;
+        border: 2px solid #fff;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+    }
+
+    /* 操作ボタンのコンテナ */
+    #controls {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 10px 20px;
+        border-radius: 50px;
+        display: flex;
+        gap: 15px;
+    }
+
+    /* ボタン共通のスタイル */
+    .control-button {
+        background-color: #3c4043;
+        color: white;
+        border: none;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        font-size: 24px;
+        cursor: pointer;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        transition: background-color 0.2s;
+    }
+    .control-button:hover { background-color: #5f6368; }
+    .control-button:disabled { background-color: #282a2d; cursor: not-allowed; }
+
+    #callButton { background-color: #33a853; }
+    #callButton.hangup { background-color: #ea4335; }
+
+    /* 初期画面用のスタイル */
+    #initial-view { text-align: center; }
+    #initial-view h1 { font-weight: 300; }
+    #createRoomButton {
+        padding: 15px 30px;
+        font-size: 18px;
+        border-radius: 8px;
+        border: none;
+        background-color: #8ab4f8;
+        color: #202124;
+        cursor: pointer;
+        z-index: 10;
+    }
+
+    /* ▼▼▼ ここからがレスポンシブ対応の「魔法のコード」です ▼▼▼ */
+    
+    /* 画面の横幅が768px以下の場合（スマートフォンやタブレットを想定） */
+    @media (max-width: 768px) {
+        #localVideo {
+            /* ワイプを少し小さく、端からの距離も調整 */
+            width: 30vw;
+            bottom: 15px;
+            right: 15px;
+        }
+
+        #controls {
+            /* ボタンコンテナの隙間を調整 */
+            padding: 8px 15px;
+            gap: 10px;
+            bottom: 15px;
+        }
+
+        .control-button {
+            /* ボタン自体を少し小さくする */
+            width: 45px;
+            height: 45px;
+            font-size: 20px;
+        }
+    }
+
+    /* 画面が縦長の場合（スマートフォンの縦持ちを想定） */
+    @media (orientation: portrait) {
+        #localVideo {
+            /* 自分の映像のサイズを縦長の画面に適応 */
+            width: 35vw;
+            max-width: 150px;
+        }
+
+        #controls {
+            /* ボタンが横に広がりすぎないように調整 */
+            width: auto;
+        }
+    }
+</style>
 </head>
 <body>
     <div id="video-container">

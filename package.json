@@ -1,5 +1,3 @@
-// package.json
-
 {
   "name": "webrtc-local",
   "version": "1.0.0",
@@ -7,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"  // ← この行を追加！
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",

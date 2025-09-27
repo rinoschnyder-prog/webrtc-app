@@ -3,7 +3,7 @@
 // HTML要素を取得
 const startButton = document.getElementById('startButton');
 const callButton = document.getElementById('callButton');
-const hangupButton = document.getElementById('hangupButton');
+// hangupButtonはcallButtonと兼用するので、getElementByIdのリストからは削除
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 const micButton = document.getElementById('micButton');
@@ -13,11 +13,11 @@ let localStream;
 let pc; // PeerConnection
 let socket; // WebSocket
 
-// ★★★ 無料のOpen Relay ProjectのTURNサーバー情報を設定 ★★★
+// 無料のOpen Relay ProjectのTURNサーバー情報を設定
 const servers = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:1932' },
-        { // ▼▼▼ ここが新しい設定 ▼▼▼
+        {
             urls: 'turn:openrelay.metered.ca:80',
             username: 'openrelayproject',
             credential: 'openrelayproject'
@@ -27,31 +27,37 @@ const servers = {
 
 // --- ボタンのクリックイベントを登録 ---
 startButton.addEventListener('click', start);
-callButton.addEventListener('click', call);
-hangupButton.addEventListener('click', hangup);
+callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', toggleMic);
 videoButton.addEventListener('click', toggleVideo);
 
+// Call/Hang Upボタンの兼用ハンドラ
+let isCallInProgress = false;
+function handleCallButtonClick() {
+    if (isCallInProgress) {
+        hangup();
+    } else {
+        call();
+    }
+}
 
 // --- シグナリングサーバーに接続 ---
 function connectWebSocket() {
-    // ページのURLからルーム名を取得
     const room = new URL(window.location.href).searchParams.get('room');
     if (!room) {
         alert('ルーム名が指定されていません。URLの末尾に `?room=あなたのルーム名` を追加してください。');
         return;
     }
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // WebSocketのURLにルーム名を追加
+    const wsProtocol = window.location.protocol === 'https' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
-    console.log(`Connecting to WebSocket: ${wsUrl}`);
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
         console.log('WebSocket connected');
-        // ★ 接続が確立したらCallボタンを有効化する
-        callButton.disabled = false;
+        callButton.disabled = false; // WebSocket接続後にCallボタンを有効化
+        micButton.disabled = false;
+        videoButton.disabled = false;
     };
 
     socket.onmessage = async (event) => {
@@ -60,135 +66,140 @@ function connectWebSocket() {
             console.log('Received message:', message);
 
             if (message.offer) {
-                if (!pc) {
-                    createPeerConnection();
-                }
+                if (!pc) createPeerConnection();
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 socket.send(JSON.stringify({ answer: pc.localDescription }));
-
+                // 着信側も通話状態にする
+                isCallInProgress = true;
+                updateCallButton(true);
             } else if (message.answer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
-
             } else if (message.candidate) {
-                if (pc) {
-                    await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
-                }
+                if (pc) await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
             }
         } catch (e) {
             console.error('Error handling message:', e);
         }
     };
-
+    
     socket.onerror = (error) => {
         console.error('WebSocket Error:', error);
     };
 }
 
-
 // PeerConnectionを作成する共通関数
 function createPeerConnection() {
-    console.log('Creating PeerConnection...');
-    try {
-        pc = new RTCPeerConnection(servers);
+    pc = new RTCPeerConnection(servers);
 
-        pc.oniceconnectionstatechange = (event) => {
-            console.log(`ICE connection state change: ${pc.iceConnectionState}`);
-        };
-
-        pc.onicecandidate = event => {
-            if (event.candidate) {
-                console.log('Sending ICE candidate:', event.candidate);
-                socket.send(JSON.stringify({ candidate: event.candidate }));
-            }
-        };
-
-        pc.ontrack = event => {
-            console.log('Received remote stream');
-            remoteVideo.srcObject = event.streams[0];
-        };
-
-        if (localStream) {
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-            console.log('Local stream added to PeerConnection');
+    pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state change: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            // 接続が成功したら通話状態にする
+            isCallInProgress = true;
+            updateCallButton(true);
         }
-    } catch (e) {
-        console.error('Failed to create PeerConnection:', e);
+    };
+
+    pc.onicecandidate = event => {
+        if (event.candidate) {
+            socket.send(JSON.stringify({ candidate: event.candidate }));
+        }
+    };
+
+    pc.ontrack = event => {
+        remoteVideo.srcObject = event.streams[0];
+    };
+
+    if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 }
 
-
-// 1. カメラを開始する関数
+// 1. カメラを開始する（ページの自動実行から呼ばれる）
 async function start() {
-    console.log('1. start関数が開始されました。');
-    startButton.disabled = true;
-    
     try {
-        console.log('2. navigator.mediaDevices.getUserMedia を呼び出します...');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-        
-        console.log('3. getUserMediaが成功しました！ストリームを取得。');
         localVideo.srcObject = stream;
         localStream = stream;
-        
-        connectWebSocket(); // WebSocket接続を開始
-        console.log('4. カメラの表示とWebSocket接続準備が完了しました。');
+        connectWebSocket();
     } catch (e) {
-        console.error('カメラの起動中にエラーが発生しました:', e);
         alert(`カメラの起動に失敗しました: ${e.name}`);
-        startButton.disabled = false;
     }
 }
 
 // 2. 接続を開始 (Call) する関数
 async function call() {
-    console.log('Call button clicked');
-    callButton.disabled = true;
-    hangupButton.disabled = false;
-
-    if (!pc) {
-        createPeerConnection();
-    }
+    console.log('Calling...');
+    if (!pc) createPeerConnection();
     
-    try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        console.log('Sending offer:', offer);
-        socket.send(JSON.stringify({ offer: pc.localDescription }));
-    } catch(e) {
-        console.error('Error creating offer:', e);
-    }
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.send(JSON.stringify({ offer: pc.localDescription }));
+
+    isCallInProgress = true;
+    updateCallButton(true);
 }
 
 // 3. 接続を終了する関数
 function hangup() {
-    console.log('Hanging up.');
+    console.log('Hanging up...');
     if (pc) {
         pc.close();
         pc = null;
     }
-    window.location.reload();
+    isCallInProgress = false;
+    updateCallButton(false);
+    remoteVideo.srcObject = null; // 相手のビデオをクリア
+    
+    // 必要であれば、WebSocketを再接続したり、ページをリロードしたりする
+    // 今回はシンプルにボタンの状態を戻すだけにする
 }
 
-// マイクのミュートを切り替える関数
-function toggleMic() {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        micButton.textContent = audioTrack.enabled ? '🎤' : '🔇';
-        micButton.style.backgroundColor = audioTrack.enabled ? '#3c4043' : '#ea4335';
+// Callボタンの表示を更新する関数
+function updateCallButton(isInProgress) {
+    if (isInProgress) {
+        callButton.classList.add('hangup'); // 赤色にするためのクラスを追加 (CSSで定義)
+        callButton.style.transform = 'scaleX(-1)'; // 絵文字を反転
+    } else {
+        callButton.classList.remove('hangup'); // 赤色クラスを削除
+        callButton.style.transform = 'none'; // 反転を戻す
     }
 }
 
-// ビデオのオン/オフを切り替える関数
+// --- マイクのミュートを切り替える関数 ---
+function toggleMic() {
+    if (!localStream) return;
+
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        
+        if (audioTrack.enabled) {
+            micButton.textContent = '🎤';
+            micButton.style.backgroundColor = '#3c4043';
+        } else {
+            micButton.textContent = '🔇';
+            micButton.style.backgroundColor = '#ea4335';
+        }
+    }
+}
+
+// --- ビデオのオン/オフを切り替える関数 ---
 function toggleVideo() {
     if (!localStream) return;
+
     const videoTrack = localStream.getVideoTracks()[0];
     if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
-        videoButton.textContent = videoTrack.enabled ? '📹' : '🚫';
-        videoButton.style.backgroundColor = videoTrack.enabled ? '#3c4043' : '#ea4335';
+
+        if (videoTrack.enabled) {
+            videoButton.textContent = '📹';
+            videoButton.style.backgroundColor = '#3c4043';
+        } else {
+            videoButton.textContent = '🚫';
+            videoButton.style.backgroundColor = '#ea4335';
+        }
     }
 }

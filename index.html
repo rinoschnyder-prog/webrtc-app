@@ -1,135 +1,47 @@
+<!-- index.html の全体をこれで置き換えてください -->
 <!DOCTYPE html>
 <html>
 <head>
     <title>WebRTC Video Chat</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        /* 基本設定 */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #202124; /* ダークな背景色 */
-            color: #ffffff;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-
-        /* ビデオ全体のコンテナ */
-        #video-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            overflow: hidden; /* はみ出した部分を隠す */
-            background-color: #000;
-        }
-
-        /* 相手のビデオ (メイン) */
-        #remoteVideo {
-            width: 100%;
-            height: 100%;
-            object-fit: cover; /* アスペクト比を保ちつつ、コンテナを埋める */
-        }
-
-        /* 自分のビデオ (ワイプ) */
-        #localVideo {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            width: 25%;
-            max-width: 200px; /* 最大幅を指定 */
-            height: auto;
-            border: 2px solid #fff;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-        }
-
-        /* 操作ボタンのコンテナ */
-        #controls {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%); /* 中央揃え */
-            background-color: rgba(0, 0, 0, 0.5);
-            padding: 10px 20px;
-            border-radius: 50px; /* 角を丸くする */
-            display: flex;
-            gap: 15px; /* ボタン間のスペース */
-        }
-
-        /* ボタン共通のスタイル */
-        .control-button {
-            background-color: #3c4043;
-            color: white;
-            border: none;
-            width: 50px;
-            height: 50px;
-            border-radius: 50%; /* 円形にする */
-            font-size: 24px;
-            cursor: pointer;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            transition: background-color 0.2s;
-        }
-        
-        .control-button:hover {
-            background-color: #5f6368;
-        }
-
-        /* 通話終了ボタン */
-        #hangupButton {
-            background-color: #ea4335; /* 赤色 */
-        }
-        #hangupButton:hover {
-            background-color: #d93025;
-        }
-        
-        /* 初期状態のボタン（非表示にする）*/
-        #startButton, #callButton {
-            display: none;
-        }
-
+        /* CSSは変更なし */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #202124; color: #ffffff; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #video-container { position: relative; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+        #remoteVideo { width: 100%; height: 100%; object-fit: cover; }
+        #localVideo { position: absolute; bottom: 20px; right: 20px; width: 25%; max-width: 200px; height: auto; border: 2px solid #fff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+        #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.5); padding: 10px 20px; border-radius: 50px; display: flex; gap: 15px; }
+        .control-button { background-color: #3c4043; color: white; border: none; width: 50px; height: 50px; border-radius: 50%; font-size: 24px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.2s; }
+        .control-button:hover { background-color: #5f6368; }
+        #callButton { background-color: #33a853; } /* Callボタンは緑色 */
+        #callButton.hangup { background-color: #ea4335; } /* Hangup状態は赤色 */
+        #startButton { display: none; }
     </style>
 </head>
 <body>
-
-    <!-- この初期接続ボタンは画面外に配置します -->
-    <!-- 本来はUIに組み込むべきですが、今回は簡単のためJSから直接呼び出します -->
     <div style="display: none;">
-        <button id="startButton">1. カメラを開始</button>
-        <button id="callButton" disabled>2. 接続を開始 (Call)</button>
+        <button id="startButton">Start</button>
+        <!-- hangupButtonはJSから動的に操作するのでHTMLからは削除 -->
     </div>
-
-
     <div id="video-container">
-        <!-- 相手の映像 -->
         <video id="remoteVideo" autoplay playsinline></video>
-        
-        <!-- 自分の映像 -->
         <video id="localVideo" autoplay muted playsinline></video>
-
-        <!-- 操作ボタンエリア -->
         <div id="controls">
-            <button class="control-button" id="micButton">🎤</button>
-            <button class="control-button" id="hangupButton" disabled>📞</button>
-            <button class="control-button" id="videoButton">📹</button>
+            <button class="control-button" id="micButton" disabled>🎤</button>
+            <!-- ▼▼▼ ボタンをcallButtonに変更し、初期状態を有効にする ▼▼▼ -->
+            <button class="control-button" id="callButton" disabled>📞</button> 
+            <button class="control-button" id="videoButton" disabled>📹</button>
         </div>
     </div>
 
     <script src="main.js"></script>
     <script>
-        // ★ ページが読み込まれたら自動でカメラを開始するだけにする
+        // ページが読み込まれたら自動でカメラを開始するだけ
         window.addEventListener('load', () => {
             setTimeout(() => {
                 document.getElementById('startButton').click();
             }, 500);
         });
-
-        // 通話終了ボタンの絵文字を反転させる
-        document.getElementById('hangupButton').style.transform = 'scaleX(-1)';
     </script>
 </body>
 </html>

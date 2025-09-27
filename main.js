@@ -15,43 +15,39 @@ let localStream;
 let pc;
 let socket;
 
-const servers = { /* 変更なし */ };
+const servers = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:1932' },
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
+    ]
+};
 
 // --- ボタンのクリックイベントを登録 ---
-// startButtonの代わりにcreateRoomButtonを登録
 createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', toggleMic);
 videoButton.addEventListener('click', toggleVideo);
 
-// 新しいルームを作成してリダイレクトする関数
 function createNewRoom() {
-    const newRoomId = uuid.v4(); // v4形式のUUIDを生成
-    // ?room=... を付けた新しいURLにリダイレクト
+    const newRoomId = uuid.v4();
     window.location.href = `/?room=${newRoomId}`;
 }
 
-// ページ読み込み時の処理
 window.addEventListener('load', () => {
-    // URLにルーム名がある場合のみ、通話画面を開始する
     const room = new URL(window.location.href).searchParams.get('room');
     if (room) {
         startCall();
     }
 });
 
-// 通話画面を開始するメインの関数（以前のstart関数）
 async function startCall() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         localVideo.srcObject = stream;
         localStream = stream;
-
-        // UIの状態を切り替える
         initialView.style.display = 'none';
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
-
         connectWebSocket();
     } catch (e) {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
@@ -62,18 +58,24 @@ async function startCall() {
     }
 }
 
-
-// ... (これ以降の関数は変更なし) ...
-
-// ▼▼▼ 変更がない関数も含めた完全なコードを記載します ▼▼▼
 let isCallInProgress = false;
 function handleCallButtonClick() { if (isCallInProgress) { hangup(); } else { call(); } }
+
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
     const wsProtocol = 'wss:';
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
-    socket.onopen = () => { console.log('WebSocket connected'); callButton.disabled = false; };
+
+    socket.onopen = () => {
+        console.log('WebSocket connected');
+        // ▼▼▼ ここが最重要の修正点 ▼▼▼
+        callButton.disabled = false;
+        micButton.disabled = false;  // ★ マイクボタンを有効化
+        videoButton.disabled = false; // ★ ビデオボタンを有効化
+        // ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲
+    };
+
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
@@ -93,6 +95,7 @@ function connectWebSocket() {
         } catch (e) { console.error('Error handling message:', e); }
     };
 }
+
 function createPeerConnection() {
     pc = new RTCPeerConnection(servers);
     pc.oniceconnectionstatechange = () => { console.log(`ICE connection state change: ${pc.iceConnectionState}`); if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') { isCallInProgress = true; updateCallButton(true); } };
@@ -100,6 +103,7 @@ function createPeerConnection() {
     pc.ontrack = event => { remoteVideo.srcObject = event.streams[0]; };
     if (localStream) { localStream.getTracks().forEach(track => pc.addTrack(track, localStream)); }
 }
+
 async function call() {
     if (!pc) createPeerConnection();
     const offer = await pc.createOffer();
@@ -108,12 +112,14 @@ async function call() {
     isCallInProgress = true;
     updateCallButton(true);
 }
+
 function hangup() {
     if (pc) { pc.close(); pc = null; }
     isCallInProgress = false;
     updateCallButton(false);
     remoteVideo.srcObject = null;
 }
+
 function updateCallButton(isInProgress) {
     if (isInProgress) {
         callButton.classList.add('hangup');
@@ -123,6 +129,7 @@ function updateCallButton(isInProgress) {
         callButton.style.transform = 'none';
     }
 }
+
 function toggleMic() {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -132,6 +139,7 @@ function toggleMic() {
         micButton.style.backgroundColor = audioTrack.enabled ? '#3c4043' : '#ea4335';
     }
 }
+
 function toggleVideo() {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];

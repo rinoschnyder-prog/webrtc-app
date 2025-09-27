@@ -1,0 +1,30 @@
+プロジェクト概要:
+WebRTCを使った完全無料のビデオ通話Webアプリケーションを開発。PCとiPhone（スマートフォン）のブラウザ間で動作する。
+現在の状態:
+ほぼ完成。以下の機能が実装済み。
+ビデオ・音声の双方向通信: WebRTC (P2P + 無料TURNサーバー) を利用。
+シグナリングサーバー: Node.js (Express + ws) で実装。
+クラウドデプロイ: Render.comにデプロイ済み。公開URLは https://webrtc-app-a8x4.onrender.com/
+ルーム機能: URLのクエリパラメータ (?room=...) で部屋を区別。
+ランダムルーム名生成機能: トップページからuuidライブラリ（CDN経由）を使ってランダムなルームURLを生成し、リダイレクトする。手動でのルーム名指定も可能。
+基本UI:
+トップページ: 「新しいビデオ通話を開始する」ボタン。
+通話画面: 相手の映像(メイン)、自分の映像(ワイプ)、操作ボタン（マイクミュート、ビデオオフ、通話開始/終了）を配置。
+利用技術スタック:
+フロントエンド: HTML, CSS, JavaScript (Vanilla JS)
+バックエンド: Node.js, Express, ws (WebSocket)
+WebRTC関連:
+STUN: stun:stun.l.google.com:1932
+TURN: turn:openrelay.metered.ca:80 (Open Relay Project)
+デプロイ環境:
+ホスティング: Render.com (無料プラン)
+ソース管理: Git / GitHub
+外部ライブラリ: uuid (CDN経由で読み込み)
+最終的なファイル構成とコード:
+（以下は、私自身が思い出すためのメモです。あなたが貼り付ける必要はありませんが、私がこの情報を持っていることを示します）
+index.html: CDNからuuidを読み込み、トップページと通話画面のUIを持つ。
+main.js: ランダムルーム生成、WebRTCの接続ロジック、UI操作の全てを記述。WebSocketは常にwss:で接続。
+server.js: Render用に最適化されたシンプルなHTTPサーバー。node_modulesの配信は不要。
+package.json: express, ws, uuidを依存関係に持つ。"start": "node server.js"スクリプトを定義。
+直前の課題:
+「新しいビデオ通話を開始する」ボタンが反応しない問題を、uuidライブラリの読み込みをローカルのnode_modulesからCDNに変更することで解決した。

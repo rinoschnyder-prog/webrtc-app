@@ -1,52 +1,42 @@
-// server.js (ルーム機能・クラウド対応版)
+// server.js (Renderデプロイ専用・最終確定版)
 
-const https = require('https');
-const fs = require('fs');
+const http = require('http'); // HTTPサーバー機能だけを読み込む
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const url = require('url'); // ★ URLを解析するために追加
+const url = require('url');
 
 const app = express();
-// ★ Renderが環境変数でPORTを指定してくるので、それに従う。ローカルテスト用には8080を維持。
-const port = process.env.PORT || 8080; 
+// Renderが指定するポート番号を取得。もしなければ3000番を使う（ローカルテスト用）
+const port = process.env.PORT || 3000; 
 
-// index.html や main.js を配信するための設定
-// ★ RenderではHTTPS化が自動で行われるため、ローカルのような証明書設定は不要。
-//    しかし、ローカルテストのためにHTTPSサーバーのロジックは残しておきます。
-if (fs.existsSync('./localhost+2-key.pem')) {
-    console.log('Starting HTTPS server for local development.');
-    const options = {
-      key: fs.readFileSync('./localhost+2-key.pem'),
-      cert: fs.readFileSync('./localhost+2.pem')
-    };
-    var server = https.createServer(options, app);
-} else {
-    console.log('Starting HTTP server for production (Render).');
-    var server = require('http').createServer(app);
-}
-
+// index.html や main.js などの静的ファイルを配信する設定
 app.use(express.static(__dirname));
 
-// WebSocketサーバーを起動
+// Expressアプリを使ってHTTPサーバーを直接作成する
+const server = http.createServer(app);
+
+// 作成したHTTPサーバーにWebSocketサーバーを紐づける
 const wss = new WebSocketServer({ server });
 
+// WebSocketの接続があった時の処理
 wss.on('connection', (ws, req) => {
-  // ★ 接続URLからルーム名を取得する
-  const parameters = new URL(req.url, `https://${req.headers.host}`).searchParams;
+  // 接続URLからルーム名を取得する
+  const parameters = new URL(req.url, `http://${req.headers.host}`).searchParams;
   const room = parameters.get('room');
+  
   if (!room) {
-    console.log('Room not specified, closing connection.');
+    console.log('ルーム名が指定されていないため、接続を閉じます。');
     ws.close();
     return;
   }
   
-  // ★ WebSocketオブジェクトにルーム名を紐づける
   ws.room = room;
-  console.log(`Client connected to room: ${room}`);
+  console.log(`クライアントがルームに参加しました: ${room}`);
 
+  // メッセージを受信した時の処理
   ws.on('message', message => {
     const messageString = message.toString();
-    // ★ 同じルームにいる、自分以外のクライアントにだけメッセージを転送する
+    // 同じルームにいる、自分以外のクライアントにだけメッセージを転送する
     wss.clients.forEach(client => {
       if (client !== ws && client.room === ws.room && client.readyState === 1) {
         client.send(messageString);
@@ -54,11 +44,13 @@ wss.on('connection', (ws, req) => {
     });
   });
 
+  // 接続が閉じた時の処理
   ws.on('close', () => {
-    console.log(`Client disconnected from room: ${room}`);
+    console.log(`クライアントがルームから退出しました: ${room}`);
   });
 });
 
+// サーバーを指定されたポートで起動し、接続を待ち受ける
 server.listen(port, () => {
-  console.log(`Server started on port ${port}`);
+  console.log(`サーバーがポート ${port} で起動し、接続を待っています。`);
 });

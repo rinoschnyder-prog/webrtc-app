@@ -5,7 +5,7 @@
     <title>WebRTC Video Chat</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        /* CSSは変更なし */
+        /* CSSは変更なし（startButtonのスタイルが新しいボタンに適用されます） */
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #202124; color: #ffffff; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
         #video-container { position: relative; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
         #remoteVideo { width: 100%; height: 100%; object-fit: cover; }
@@ -13,35 +13,39 @@
         #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.5); padding: 10px 20px; border-radius: 50px; display: flex; gap: 15px; }
         .control-button { background-color: #3c4043; color: white; border: none; width: 50px; height: 50px; border-radius: 50%; font-size: 24px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.2s; }
         .control-button:hover { background-color: #5f6368; }
-        #callButton { background-color: #33a853; } /* Callボタンは緑色 */
-        #callButton.hangup { background-color: #ea4335; } /* Hangup状態は赤色 */
-        #startButton { display: none; }
+        .control-button:disabled { background-color: #282a2d; cursor: not-allowed; }
+        #callButton { background-color: #33a853; }
+        #callButton.hangup { background-color: #ea4335; }
+        /* 新しいボタンと初期画面用のスタイル */
+        #initial-view { text-align: center; }
+        #initial-view h1 { font-weight: 300; }
+        #createRoomButton {
+            padding: 15px 30px; font-size: 18px; border-radius: 8px; border: none;
+            background-color: #8ab4f8; color: #202124; cursor: pointer; z-index: 10;
+        }
     </style>
 </head>
 <body>
-    <div style="display: none;">
-        <button id="startButton">Start</button>
-        <!-- hangupButtonはJSから動的に操作するのでHTMLからは削除 -->
-    </div>
     <div id="video-container">
-        <video id="remoteVideo" autoplay playsinline></video>
+        <!-- ▼▼▼ 初期画面のUIを変更 ▼▼▼ -->
+        <div id="initial-view">
+            <h1>WebRTC Video Chat</h1>
+            <button id="createRoomButton">新しいビデオ通話を開始する</button>
+        </div>
+
+        <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
-        <div id="controls">
-            <button class="control-button" id="micButton" disabled>🎤</button>
-            <!-- ▼▼▼ ボタンをcallButtonに変更し、初期状態を有効にする ▼▼▼ -->
+
+        <div id="controls" style="display: none;">
+            <button class="control-button" id="micButton">🎤</button>
             <button class="control-button" id="callButton" disabled>📞</button> 
-            <button class="control-button" id="videoButton" disabled>📹</button>
+            <button class="control-button" id="videoButton">📹</button>
         </div>
     </div>
+    
+    <!-- ▼▼▼ uuidライブラリをブラウザで使えるように読み込む ▼▼▼ -->
+    <script src="/node_modules/uuid/dist/umd/uuid.min.js"></script>
 
     <script src="main.js"></script>
-    <script>
-        // ページが読み込まれたら自動でカメラを開始するだけ
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                document.getElementById('startButton').click();
-            }, 500);
-        });
-    </script>
 </body>
 </html>

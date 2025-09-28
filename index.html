@@ -1,4 +1,4 @@
-<!-- index.html の全体をこれで置き換えてください -->
+<!-- index.html の全体をこれで置き換えください -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -64,33 +64,43 @@
         left: 50%;
         transform: translateX(-50%);
         background-color: rgba(0, 0, 0, 0.5);
-        padding: 10px 20px;
+        padding: 10px 15px;
         border-radius: 50px;
         display: flex;
-        gap: 15px;
+        gap: 10px; /* ボタン間の隙間を少し詰める */
     }
 
-    /* ▼▼▼ 変更: ボタンとSVGアイコンのスタイルを調整 ▼▼▼ */
+    /* ▼▼▼ 変更: ボタンのスタイルを全面的に修正 ▼▼▼ */
     .control-button {
         background-color: #3c4043;
         color: white;
         border: none;
-        width: 50px;
-        height: 50px;
-        border-radius: 50%;
+        /* ボタンの形状を縦長の円形に変更 */
+        width: 80px;
+        height: 60px;
+        border-radius: 20px;
         cursor: pointer;
+        /* Flexboxでアイコンとラベルを縦に並べる */
         display: flex;
+        flex-direction: column;
         justify-content: center;
         align-items: center;
         transition: background-color 0.2s;
-    }
-    .control-button svg {
-        width: 24px;
-        height: 24px;
-        fill: currentColor; /* アイコンの色を親要素のcolorに合わせる */
+        padding: 5px 0;
     }
     .control-button:hover { background-color: #5f6368; }
-    .control-button:disabled { background-color: #282a2d; cursor: not-allowed; }
+    .control-button:disabled { background-color: #282a2d; cursor: not-allowed; opacity: 0.5; }
+
+    /* アイコン部分のスタイル */
+    .icon {
+        font-size: 24px;
+        height: 28px; /* 高さを固定してガタつきを防ぐ */
+    }
+    /* ラベル部分のスタイル */
+    .label {
+        font-size: 10px;
+        margin-top: 2px;
+    }
 
     #callButton { background-color: #33a853; }
     #callButton.hangup { background-color: #ea4335; }
@@ -116,28 +126,16 @@
             right: 15px;
         }
         #controls {
-            padding: 8px 15px;
-            gap: 10px;
+            padding: 8px 10px;
+            gap: 8px;
             bottom: 15px;
         }
         .control-button {
-            width: 45px;
-            height: 45px;
+            width: 70px;
+            height: 55px;
         }
-        .control-button svg {
-            width: 20px;
-            height: 20px;
-        }
-    }
-
-    @media (orientation: portrait) {
-        #localVideo {
-            width: 35vw;
-            max-width: 150px;
-        }
-        #controls {
-            width: auto;
-        }
+        .icon { font-size: 20px; }
+        .label { font-size: 9px; }
     }
 </style>
 </head>
@@ -153,10 +151,19 @@
         <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
         <div id="controls" style="display: none;">
-            <!-- ▼▼▼ 変更: ボタンの中のテキストを削除 ▼▼▼ -->
-            <button class="control-button" id="micButton" disabled></button>
-            <button class="control-button" id="callButton" disabled></button> 
-            <button class="control-button" id="videoButton" disabled></button>
+            <!-- ▼▼▼ 変更: ボタンの構造をアイコンとラベルの二階建てに変更 ▼▼▼ -->
+            <button class="control-button" id="micButton" disabled>
+                <div class="icon">🎤</div>
+                <div class="label">マイク</div>
+            </button>
+            <button class="control-button" id="callButton" disabled>
+                <div class="icon">📞</div>
+                <div class="label">通話開始</div>
+            </button>
+            <button class="control-button" id="videoButton" disabled>
+                <div class="icon">📹</div>
+                <div class="label">ビデオ</div>
+            </button>
         </div>
     </div>
     

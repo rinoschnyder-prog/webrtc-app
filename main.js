@@ -1,7 +1,5 @@
-// main.js の全体をこれで置き換えてください
+// main.js (最終確定版)
 'use strict';
-
-// HTML要素を取得
 const createRoomButton = document.getElementById('createRoomButton');
 const callButton = document.getElementById('callButton');
 const localVideo = document.getElementById('localVideo');
@@ -10,36 +8,25 @@ const micButton = document.getElementById('micButton');
 const videoButton = document.getElementById('videoButton');
 const initialView = document.getElementById('initial-view');
 const controls = document.getElementById('controls');
-
-let localStream;
-let pc;
-let socket;
-
+let localStream, pc, socket;
 const servers = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:1932' },
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
     ]
 };
-
-// --- ボタンのクリックイベントを登録 ---
 createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', toggleMic);
 videoButton.addEventListener('click', toggleVideo);
-
 function createNewRoom() {
     const newRoomId = uuid.v4();
     window.location.href = `/?room=${newRoomId}`;
 }
-
 window.addEventListener('load', () => {
     const room = new URL(window.location.href).searchParams.get('room');
-    if (room) {
-        startCall();
-    }
+    if (room) startCall();
 });
-
 async function startCall() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -57,25 +44,19 @@ async function startCall() {
         }
     }
 }
-
 let isCallInProgress = false;
 function handleCallButtonClick() { if (isCallInProgress) { hangup(); } else { call(); } }
-
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
     const wsProtocol = 'wss:';
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
-
     socket.onopen = () => {
         console.log('WebSocket connected');
-        // ▼▼▼ ここが最重要の修正点 ▼▼▼
         callButton.disabled = false;
-        micButton.disabled = false;  // ★ マイクボタンを有効化
-        videoButton.disabled = false; // ★ ビデオボタンを有効化
-        // ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲ ▲▲▲
+        micButton.disabled = false;
+        videoButton.disabled = false;
     };
-
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
@@ -95,7 +76,6 @@ function connectWebSocket() {
         } catch (e) { console.error('Error handling message:', e); }
     };
 }
-
 function createPeerConnection() {
     pc = new RTCPeerConnection(servers);
     pc.oniceconnectionstatechange = () => { console.log(`ICE connection state change: ${pc.iceConnectionState}`); if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') { isCallInProgress = true; updateCallButton(true); } };
@@ -103,7 +83,6 @@ function createPeerConnection() {
     pc.ontrack = event => { remoteVideo.srcObject = event.streams[0]; };
     if (localStream) { localStream.getTracks().forEach(track => pc.addTrack(track, localStream)); }
 }
-
 async function call() {
     if (!pc) createPeerConnection();
     const offer = await pc.createOffer();
@@ -112,14 +91,12 @@ async function call() {
     isCallInProgress = true;
     updateCallButton(true);
 }
-
 function hangup() {
     if (pc) { pc.close(); pc = null; }
     isCallInProgress = false;
     updateCallButton(false);
     remoteVideo.srcObject = null;
 }
-
 function updateCallButton(isInProgress) {
     if (isInProgress) {
         callButton.classList.add('hangup');
@@ -129,7 +106,6 @@ function updateCallButton(isInProgress) {
         callButton.style.transform = 'none';
     }
 }
-
 function toggleMic() {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -139,7 +115,6 @@ function toggleMic() {
         micButton.style.backgroundColor = audioTrack.enabled ? '#3c4043' : '#ea4335';
     }
 }
-
 function toggleVideo() {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];

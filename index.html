@@ -27,8 +27,7 @@
         overflow: hidden;
         background-color: #000;
     }
-
-    /* ▼▼▼ 追加: 参加人数表示用のスタイル ▼▼▼ */
+    
     #participant-info {
         position: absolute;
         top: 20px;
@@ -37,17 +36,15 @@
         padding: 8px 15px;
         border-radius: 8px;
         font-size: 16px;
-        z-index: 10; /* ボタンより手前に表示 */
+        z-index: 10;
     }
 
-    /* 相手のビデオ (メイン) */
     #remoteVideo {
         width: 100%;
         height: 100%;
         object-fit: contain;
     }
 
-    /* 自分のビデオ (ワイプ) */
     #localVideo {
         position: absolute;
         bottom: 20px;
@@ -61,7 +58,6 @@
         box-shadow: 0 4px 8px rgba(0,0,0,0.5);
     }
 
-    /* 操作ボタンのコンテナ */
     #controls {
         position: absolute;
         bottom: 20px;
@@ -74,7 +70,7 @@
         gap: 15px;
     }
 
-    /* ボタン共通のスタイル */
+    /* ▼▼▼ 変更: ボタンとSVGアイコンのスタイルを調整 ▼▼▼ */
     .control-button {
         background-color: #3c4043;
         color: white;
@@ -82,12 +78,16 @@
         width: 50px;
         height: 50px;
         border-radius: 50%;
-        font-size: 24px;
         cursor: pointer;
         display: flex;
         justify-content: center;
         align-items: center;
         transition: background-color 0.2s;
+    }
+    .control-button svg {
+        width: 24px;
+        height: 24px;
+        fill: currentColor; /* アイコンの色を親要素のcolorに合わせる */
     }
     .control-button:hover { background-color: #5f6368; }
     .control-button:disabled { background-color: #282a2d; cursor: not-allowed; }
@@ -123,7 +123,10 @@
         .control-button {
             width: 45px;
             height: 45px;
-            font-size: 20px;
+        }
+        .control-button svg {
+            width: 20px;
+            height: 20px;
         }
     }
 
@@ -145,15 +148,15 @@
             <button id="createRoomButton">新しいビデオ通話を開始する</button>
         </div>
         
-        <!-- ▼▼▼ 追加: 参加人数を表示する要素 ▼▼▼ -->
         <div id="participant-info" style="display: none;">参加人数: 1人</div>
 
         <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
         <div id="controls" style="display: none;">
-            <button class="control-button" id="micButton" disabled>🎤</button>
-            <button class="control-button" id="callButton" disabled>📞</button> 
-            <button class="control-button" id="videoButton" disabled>📹</button>
+            <!-- ▼▼▼ 変更: ボタンの中のテキストを削除 ▼▼▼ -->
+            <button class="control-button" id="micButton" disabled></button>
+            <button class="control-button" id="callButton" disabled></button> 
+            <button class="control-button" id="videoButton" disabled></button>
         </div>
     </div>
     

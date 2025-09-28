@@ -1,4 +1,4 @@
-// main.js (TURNサーバーを再有効化した修正版)
+// main.js の全体をこれで置き換えてください
 'use strict';
 const createRoomButton = document.getElementById('createRoomButton');
 const callButton = document.getElementById('callButton');
@@ -8,12 +8,14 @@ const micButton = document.getElementById('micButton');
 const videoButton = document.getElementById('videoButton');
 const initialView = document.getElementById('initial-view');
 const controls = document.getElementById('controls');
+// ▼▼▼ 追加: 参加人数表示用の要素を取得 ▼▼▼
+const participantInfo = document.getElementById('participant-info');
+
 let localStream, pc, socket;
 let remoteCandidatesQueue = [];
 const servers = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:1932' },
-        // ▼▼▼ ここを有効に戻す ▼▼▼
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
     ]
 };
@@ -37,6 +39,8 @@ async function startCall() {
         initialView.style.display = 'none';
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
+        // ▼▼▼ 追加: 参加人数表示を有効化 ▼▼▼
+        participantInfo.style.display = 'block';
         connectWebSocket();
     } catch (e) {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
@@ -66,32 +70,26 @@ function connectWebSocket() {
             if (message.offer) {
                 if (!pc) createPeerConnection();
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
-
-                for (const candidate of remoteCandidatesQueue) {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                }
+                for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
                 remoteCandidatesQueue = [];
-
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 socket.send(JSON.stringify({ answer: pc.localDescription }));
                 isCallInProgress = true;
                 updateCallButton(true);
-
             } else if (message.answer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
-                
-                for (const candidate of remoteCandidatesQueue) {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                }
+                for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
                 remoteCandidatesQueue = [];
-
             } else if (message.candidate) {
                 if (pc && pc.remoteDescription) {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
                 } else {
                     remoteCandidatesQueue.push(message.candidate);
                 }
+            // ▼▼▼ 追加: サーバーから参加人数通知を受け取った時の処理 ▼▼▼
+            } else if (message.type === 'count') {
+                participantInfo.textContent = `参加人数: ${message.count}人`;
             }
         } catch (e) { console.error('Error handling message:', e); }
     };
@@ -123,6 +121,8 @@ function hangup() {
     updateCallButton(false);
     remoteVideo.srcObject = null;
     remoteCandidatesQueue = [];
+    // ▼▼▼ 追加: トップページに戻るなど、切断後の挙動を明確にするならここに追加 ▼▼▼
+    // window.location.href = '/'; 
 }
 function updateCallButton(isInProgress) {
     if (isInProgress) {

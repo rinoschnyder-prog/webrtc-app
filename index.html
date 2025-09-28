@@ -16,17 +16,28 @@
         justify-content: center;
         align-items: center;
         height: 100vh;
-        /* ▼▼▼ 画面がはみ出さないように設定を追加 ▼▼▼ */
         overflow: hidden;
     }
 
     /* ビデオ全体のコンテナ */
     #video-container {
         position: relative;
-        width: 100vw;   /* 画面の幅いっぱいに広がる */
-        height: 100vh;  /* 画面の高さっぱいに広がる */
+        width: 100vw;
+        height: 100vh;
         overflow: hidden;
         background-color: #000;
+    }
+
+    /* ▼▼▼ 追加: 参加人数表示用のスタイル ▼▼▼ */
+    #participant-info {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 8px 15px;
+        border-radius: 8px;
+        font-size: 16px;
+        z-index: 10; /* ボタンより手前に表示 */
     }
 
     /* 相手のビデオ (メイン) */
@@ -41,10 +52,9 @@
         position: absolute;
         bottom: 20px;
         right: 20px;
-        /* ▼▼▼ 画面幅に応じてサイズが変わるように変更 ▼▼▼ */
-        width: 25vw; /* 画面幅の25% */
+        width: 25vw;
         max-width: 200px;
-        min-width: 100px; /* 最小幅も指定 */
+        min-width: 100px;
         height: auto;
         border: 2px solid #fff;
         border-radius: 8px;
@@ -98,43 +108,31 @@
         cursor: pointer;
         z-index: 10;
     }
-
-    /* ▼▼▼ ここからがレスポンシブ対応の「魔法のコード」です ▼▼▼ */
     
-    /* 画面の横幅が768px以下の場合（スマートフォンやタブレットを想定） */
     @media (max-width: 768px) {
         #localVideo {
-            /* ワイプを少し小さく、端からの距離も調整 */
             width: 30vw;
             bottom: 15px;
             right: 15px;
         }
-
         #controls {
-            /* ボタンコンテナの隙間を調整 */
             padding: 8px 15px;
             gap: 10px;
             bottom: 15px;
         }
-
         .control-button {
-            /* ボタン自体を少し小さくする */
             width: 45px;
             height: 45px;
             font-size: 20px;
         }
     }
 
-    /* 画面が縦長の場合（スマートフォンの縦持ちを想定） */
     @media (orientation: portrait) {
         #localVideo {
-            /* 自分の映像のサイズを縦長の画面に適応 */
             width: 35vw;
             max-width: 150px;
         }
-
         #controls {
-            /* ボタンが横に広がりすぎないように調整 */
             width: auto;
         }
     }
@@ -146,10 +144,13 @@
             <h1>WebRTC Video Chat</h1>
             <button id="createRoomButton">新しいビデオ通話を開始する</button>
         </div>
+        
+        <!-- ▼▼▼ 追加: 参加人数を表示する要素 ▼▼▼ -->
+        <div id="participant-info" style="display: none;">参加人数: 1人</div>
+
         <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
         <div id="controls" style="display: none;">
-            <!-- ▼▼▼ 全てのボタンの初期状態をdisabledに統一 ▼▼▼ -->
             <button class="control-button" id="micButton" disabled>🎤</button>
             <button class="control-button" id="callButton" disabled>📞</button> 
             <button class="control-button" id="videoButton" disabled>📹</button>

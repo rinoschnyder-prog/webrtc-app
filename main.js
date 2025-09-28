@@ -19,6 +19,7 @@ const servers = {
     ]
 };
 
+// 安全にメッセージを送信するヘルパー関数
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
@@ -56,29 +57,36 @@ async function startCall() {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
             alert('カメラとマイクへのアクセスがブロックされました。ブラウザの設定を確認してください。');
         } else {
-            // エラーの種類を表示するように修正
             alert(`カメラの起動に失敗しました: ${e.name}`);
         }
     }
 }
 let isCallInProgress = false;
 function handleCallButtonClick() { if (isCallInProgress) { hangup(); } else { call(); } }
+
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
+
+    // ▼▼▼ 変更: WebSocketが開いた後に全ての処理を開始する ▼▼▼
     socket.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('WebSocket connected. Peer Connection will be initialized.');
+        // WebSocketが開通してからPeerConnectionを準備する
+        createPeerConnection();
+
+        // ボタンを有効化
         callButton.disabled = false;
         micButton.disabled = false;
         videoButton.disabled = false;
     };
+
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
             if (message.offer) {
-                if (!pc) createPeerConnection();
+                // createPeerConnectionはonopenで呼ばれているので不要
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
                 remoteCandidatesQueue = [];
@@ -99,11 +107,18 @@ function connectWebSocket() {
                 }
             } else if (message.type === 'count') {
                 participantInfo.textContent = `参加人数: ${message.count}人`;
+                // 2人目が参加したら、自動的にcallを開始する（先にいた人）
+                if (message.count === 2 && !isCallInProgress) {
+                    console.log("Second user joined. Initiating call.");
+                    call();
+                }
             }
         } catch (e) { console.error('Error handling message:', e); }
     };
 }
+
 function createPeerConnection() {
+    if (pc) return; // すでに作成済みの場合は何もしない
     pc = new RTCPeerConnection(servers);
     pc.oniceconnectionstatechange = () => { 
         console.log(`ICE connection state change: ${pc.iceConnectionState}`); 
@@ -120,14 +135,21 @@ function createPeerConnection() {
     pc.ontrack = event => { remoteVideo.srcObject = event.streams[0]; };
     if (localStream) { localStream.getTracks().forEach(track => pc.addTrack(track, localStream)); }
 }
+
 async function call() {
-    if (!pc) createPeerConnection();
+    // createPeerConnectionはすでに呼ばれている前提
+    if (!pc) {
+        console.error("PeerConnection not initialized yet.");
+        return;
+    }
+    console.log("Creating offer...");
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     sendMessage({ offer: pc.localDescription });
     isCallInProgress = true;
     updateCallButton(true);
 }
+
 function hangup() {
     if (socket) {
         socket.close();
@@ -142,6 +164,7 @@ function hangup() {
     remoteVideo.srcObject = null;
     remoteCandidatesQueue = [];
 }
+
 function updateCallButton(isInProgress) {
     const icon = callButton.querySelector('.icon');
     const label = callButton.querySelector('.label');
@@ -160,11 +183,8 @@ function toggleMic(isInitial = false) {
     const audioTrack = localStream.getAudioTracks()[0];
     const icon = micButton.querySelector('.icon');
     const label = micButton.querySelector('.label');
-
     if (audioTrack) {
-        if (!isInitial) {
-          audioTrack.enabled = !audioTrack.enabled;
-        }
+        if (!isInitial) audioTrack.enabled = !audioTrack.enabled;
         if (audioTrack.enabled) {
             icon.textContent = '🎤';
             label.textContent = 'ミュート';
@@ -176,21 +196,13 @@ function toggleMic(isInitial = false) {
         }
     }
 }
-
-// ▼▼▼ 修正: こちらが正しいtoggleVideo関数です ▼▼▼
 function toggleVideo(isInitial = false) {
     if (!localStream) return;
-    // 実際のビデオトラックを取得
     const videoTrack = localStream.getVideoTracks()[0];
-    // ボタンの要素を取得
     const icon = videoButton.querySelector('.icon');
     const label = videoButton.querySelector('.label');
-
     if (videoTrack) {
-        if (!isInitial) {
-          videoTrack.enabled = !videoTrack.enabled;
-        }
-        // 状態に応じて表示を切り替え
+        if (!isInitial) videoTrack.enabled = !videoTrack.enabled;
         if (videoTrack.enabled) {
             icon.textContent = '📹';
             label.textContent = 'ビデオ停止';

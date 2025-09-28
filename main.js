@@ -19,10 +19,17 @@ const servers = {
     ]
 };
 
+// ▼▼▼ 追加: WebSocketが有効な時だけメッセージを送信するヘルパー関数 ▼▼▼
+function sendMessage(message) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+    } else {
+        console.warn('WebSocket is not open. Message not sent:', message);
+    }
+}
+
 createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
-
-// ▼▼▼ 変更: クリック時に引数が渡されないように修正 ▼▼▼
 micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
 
@@ -43,8 +50,8 @@ async function startCall() {
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
         participantInfo.style.display = 'block';
-        toggleMic(true); // 初期状態を設定
-        toggleVideo(true); // 初期状態を設定
+        toggleMic(true);
+        toggleVideo(true);
         connectWebSocket();
     } catch (e) {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
@@ -77,7 +84,8 @@ function connectWebSocket() {
                 remoteCandidatesQueue = [];
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
-                socket.send(JSON.stringify({ answer: pc.localDescription }));
+                // ▼▼▼ 変更: 安全な送信関数を使用 ▼▼▼
+                sendMessage({ answer: pc.localDescription });
                 isCallInProgress = true;
                 updateCallButton(true);
             } else if (message.answer) {
@@ -105,7 +113,12 @@ function createPeerConnection() {
             updateCallButton(true); 
         } 
     };
-    pc.onicecandidate = event => { if (event.candidate) { socket.send(JSON.stringify({ candidate: event.candidate })); } };
+    pc.onicecandidate = event => { 
+        if (event.candidate) { 
+            // ▼▼▼ 変更: 安全な送信関数を使用 ▼▼▼
+            sendMessage({ candidate: event.candidate }); 
+        } 
+    };
     pc.ontrack = event => { remoteVideo.srcObject = event.streams[0]; };
     if (localStream) { localStream.getTracks().forEach(track => pc.addTrack(track, localStream)); }
 }
@@ -113,16 +126,28 @@ async function call() {
     if (!pc) createPeerConnection();
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    socket.send(JSON.stringify({ offer: pc.localDescription }));
+    // ▼▼▼ 変更: 安全な送信関数を使用 ▼▼▼
+    sendMessage({ offer: pc.localDescription });
     isCallInProgress = true;
     updateCallButton(true);
 }
 function hangup() {
-    if (pc) { pc.close(); pc = null; }
+    // ▼▼▼ 追加: WebSocket接続も閉じる ▼▼▼
+    if (socket) {
+        socket.close();
+        socket = null;
+    }
+    if (pc) { 
+        pc.close(); 
+        pc = null; 
+    }
     isCallInProgress = false;
     updateCallButton(false);
     remoteVideo.srcObject = null;
     remoteCandidatesQueue = [];
+
+    // ページをリロードするか、初期画面に戻すのが親切
+    // window.location.href = '/';
 }
 function updateCallButton(isInProgress) {
     const icon = callButton.querySelector('.icon');
@@ -137,7 +162,6 @@ function updateCallButton(isInProgress) {
         label.textContent = '通話開始';
     }
 }
-// ▼▼▼ 変更: 関数の定義にデフォルト値を追加 ▼▼▼
 function toggleMic(isInitial = false) {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -159,11 +183,9 @@ function toggleMic(isInitial = false) {
         }
     }
 }
-// ▼▼▼ 変更: 関数の定義にデフォルト値を追加 ▼▼▼
 function toggleVideo(isInitial = false) {
     if (!localStream) return;
-    const videoTrack = localStream.getVideoTracks()[0];
-    const icon = videoButton.querySelector('.icon');
+    const videoTrack = videoButton.querySelector('.icon');
     const label = videoButton.querySelector('.label');
 
     if (videoTrack) {

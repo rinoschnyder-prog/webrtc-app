@@ -19,7 +19,6 @@ const servers = {
     ]
 };
 
-// ▼▼▼ 追加: WebSocketが有効な時だけメッセージを送信するヘルパー関数 ▼▼▼
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
@@ -57,6 +56,7 @@ async function startCall() {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
             alert('カメラとマイクへのアクセスがブロックされました。ブラウザの設定を確認してください。');
         } else {
+            // エラーの種類を表示するように修正
             alert(`カメラの起動に失敗しました: ${e.name}`);
         }
     }
@@ -84,7 +84,6 @@ function connectWebSocket() {
                 remoteCandidatesQueue = [];
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
-                // ▼▼▼ 変更: 安全な送信関数を使用 ▼▼▼
                 sendMessage({ answer: pc.localDescription });
                 isCallInProgress = true;
                 updateCallButton(true);
@@ -115,7 +114,6 @@ function createPeerConnection() {
     };
     pc.onicecandidate = event => { 
         if (event.candidate) { 
-            // ▼▼▼ 変更: 安全な送信関数を使用 ▼▼▼
             sendMessage({ candidate: event.candidate }); 
         } 
     };
@@ -126,13 +124,11 @@ async function call() {
     if (!pc) createPeerConnection();
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    // ▼▼▼ 変更: 安全な送信関数を使用 ▼▼▼
     sendMessage({ offer: pc.localDescription });
     isCallInProgress = true;
     updateCallButton(true);
 }
 function hangup() {
-    // ▼▼▼ 追加: WebSocket接続も閉じる ▼▼▼
     if (socket) {
         socket.close();
         socket = null;
@@ -145,9 +141,6 @@ function hangup() {
     updateCallButton(false);
     remoteVideo.srcObject = null;
     remoteCandidatesQueue = [];
-
-    // ページをリロードするか、初期画面に戻すのが親切
-    // window.location.href = '/';
 }
 function updateCallButton(isInProgress) {
     const icon = callButton.querySelector('.icon');
@@ -183,15 +176,21 @@ function toggleMic(isInitial = false) {
         }
     }
 }
+
+// ▼▼▼ 修正: こちらが正しいtoggleVideo関数です ▼▼▼
 function toggleVideo(isInitial = false) {
     if (!localStream) return;
-    const videoTrack = videoButton.querySelector('.icon');
+    // 実際のビデオトラックを取得
+    const videoTrack = localStream.getVideoTracks()[0];
+    // ボタンの要素を取得
+    const icon = videoButton.querySelector('.icon');
     const label = videoButton.querySelector('.label');
 
     if (videoTrack) {
         if (!isInitial) {
           videoTrack.enabled = !videoTrack.enabled;
         }
+        // 状態に応じて表示を切り替え
         if (videoTrack.enabled) {
             icon.textContent = '📹';
             label.textContent = 'ビデオ停止';

@@ -21,8 +21,10 @@ const servers = {
 
 createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
-micButton.addEventListener('click', toggleMic);
-videoButton.addEventListener('click', toggleVideo);
+
+// ▼▼▼ 変更: クリック時に引数が渡されないように修正 ▼▼▼
+micButton.addEventListener('click', () => toggleMic());
+videoButton.addEventListener('click', () => toggleVideo());
 
 function createNewRoom() {
     const newRoomId = uuid.v4();
@@ -41,9 +43,8 @@ async function startCall() {
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
         participantInfo.style.display = 'block';
-        // ▼▼▼ 追加: 初期状態のラベルを更新 ▼▼▼
-        toggleMic(true);
-        toggleVideo(true);
+        toggleMic(true); // 初期状態を設定
+        toggleVideo(true); // 初期状態を設定
         connectWebSocket();
     } catch (e) {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
@@ -123,14 +124,12 @@ function hangup() {
     remoteVideo.srcObject = null;
     remoteCandidatesQueue = [];
 }
-
-// ▼▼▼ 変更: アイコンとラベルの両方を更新するように修正 ▼▼▼
 function updateCallButton(isInProgress) {
     const icon = callButton.querySelector('.icon');
     const label = callButton.querySelector('.label');
     if (isInProgress) {
         callButton.classList.add('hangup');
-        icon.style.transform = 'scaleX(-1) rotate(135deg)'; // 以前の切断アイコンの向き
+        icon.style.transform = 'scaleX(-1) rotate(135deg)';
         label.textContent = '通話終了';
     } else {
         callButton.classList.remove('hangup');
@@ -138,6 +137,7 @@ function updateCallButton(isInProgress) {
         label.textContent = '通話開始';
     }
 }
+// ▼▼▼ 変更: 関数の定義にデフォルト値を追加 ▼▼▼
 function toggleMic(isInitial = false) {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -145,7 +145,7 @@ function toggleMic(isInitial = false) {
     const label = micButton.querySelector('.label');
 
     if (audioTrack) {
-        if (!isInitial) { // 初期化呼び出しでない場合のみ状態を反転
+        if (!isInitial) {
           audioTrack.enabled = !audioTrack.enabled;
         }
         if (audioTrack.enabled) {
@@ -159,6 +159,7 @@ function toggleMic(isInitial = false) {
         }
     }
 }
+// ▼▼▼ 変更: 関数の定義にデフォルト値を追加 ▼▼▼
 function toggleVideo(isInitial = false) {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];
@@ -166,7 +167,7 @@ function toggleVideo(isInitial = false) {
     const label = videoButton.querySelector('.label');
 
     if (videoTrack) {
-        if (!isInitial) { // 初期化呼び出しでない場合のみ状態を反転
+        if (!isInitial) {
           videoTrack.enabled = !videoTrack.enabled;
         }
         if (videoTrack.enabled) {

@@ -1,5 +1,6 @@
 // main.js の全体をこれで置き換えてください
 'use strict';
+// --- DOM要素の取得 (変更なし) ---
 const createRoomButton = document.getElementById('createRoomButton');
 const callButton = document.getElementById('callButton');
 const localVideo = document.getElementById('localVideo');
@@ -10,15 +11,15 @@ const recordButton = document.getElementById('recordButton');
 const initialView = document.getElementById('initial-view');
 const controls = document.getElementById('controls');
 const participantInfo = document.getElementById('participant-info');
-
-// ▼▼▼ 変更点: Canvas関連の変数を追加 ▼▼▼
 const recordingCanvas = document.getElementById('recordingCanvas');
 const canvasContext = recordingCanvas.getContext('2d');
-let animationFrameId;
 
+// --- グローバル変数 ---
 let localStream, pc, socket;
 let isNegotiating = false;
 let isCallInProgress = false;
+let isRemoteVideoReady = false; // ▼▼▼ 変更点: 相手ビデオの準備完了フラグを追加 ▼▼▼
+let animationFrameId;
 
 // 録画関連の変数
 let mediaRecorder;
@@ -33,39 +34,125 @@ const servers = {
     ]
 };
 
-// ... (sendMessage, createRoomButton, callButtonなどのイベントリスナーは変更なし) ...
+// --- イベントリスナー (変更なし) ---
+createRoomButton.addEventListener('click', createNewRoom);
+callButton.addEventListener('click', handleCallButtonClick);
+micButton.addEventListener('click', () => toggleMic());
+videoButton.addEventListener('click', () => toggleVideo());
+recordButton.addEventListener('click', () => toggleRecording());
 
-// ▼▼▼ 変更点: Canvas描画ループ関数を追加 ▼▼▼
+
+// ▼▼▼ 変更点: 録画ボタンを有効化するための専用関数を追加 ▼▼▼
+function checkAndEnableRecording() {
+    // 通話が確立しており、かつ相手のビデオメタデータが読み込み済みの場合のみ有効化
+    if (isCallInProgress && isRemoteVideoReady) {
+        recordButton.disabled = false;
+        console.log('Recording is now possible.');
+    }
+}
+
+function createPeerConnection() {
+    if (pc) pc.close();
+    pc = new RTCPeerConnection(servers);
+    
+    pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
+        switch(pc.iceConnectionState) {
+            case 'connected':
+            case 'completed':
+                isCallInProgress = true;
+                updateCallButton(true);
+                callButton.disabled = false;
+                checkAndEnableRecording(); // ▼▼▼ 変更点: 専用関数を呼び出す ▼▼▼
+                break;
+            case 'disconnected':
+            case 'failed':
+            case 'closed':
+                if (isCallInProgress) {
+                    resetCallState();
+                }
+                break;
+        }
+    };
+
+    pc.onicecandidate = event => {
+        if (event.candidate) sendMessage({ candidate: event.candidate });
+    };
+
+    pc.ontrack = event => {
+        if (remoteVideo.srcObject !== event.streams[0]) {
+            const remoteStream = event.streams[0];
+            remoteVideo.srcObject = remoteStream;
+
+            // ▼▼▼ 変更点: 相手ビデオの準備状態をリセットし、イベントリスナーを設定 ▼▼▼
+            isRemoteVideoReady = false;
+            recordButton.disabled = true; // 新しいトラックが来たら一旦無効化
+
+            // 相手ビデオのメタデータが読み込まれたら発火
+            remoteVideo.onloadedmetadata = () => {
+                console.log('Remote video metadata loaded.');
+                isRemoteVideoReady = true;
+                checkAndEnableRecording(); // 専用関数を呼び出す
+            };
+
+            remoteVideo.play().catch(e => console.error('Remote video play failed:', e));
+        }
+    };
+    
+    if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+}
+
+function resetCallState() {
+    console.log("Resetting call state.");
+    isCallInProgress = false;
+    isNegotiating = false;
+    isRemoteVideoReady = false; // ▼▼▼ 変更点: リセット処理を追加 ▼▼▼
+    
+    if (pc) {
+        pc.close();
+        pc = null;
+    }
+    remoteVideo.srcObject = null;
+    updateCallButton(false);
+    
+    const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
+    callButton.disabled = (participantCount <= 1);
+    recordButton.disabled = true;
+    
+    if (isRecording) {
+        toggleRecording();
+    }
+
+    if (localStream) {
+        createPeerConnection();
+    }
+}
+
+// --- toggleRecording, drawVideosOnCanvas, およびその他の関数 (これらは前回のコードから変更なし) ---
 function drawVideosOnCanvas() {
-    // キャンバスを相手の映像のサイズに合わせる
+    if (!isRecording) return;
     recordingCanvas.width = remoteVideo.videoWidth;
     recordingCanvas.height = remoteVideo.videoHeight;
-
-    // 相手の映像を大きく描画
     canvasContext.drawImage(remoteVideo, 0, 0, recordingCanvas.width, recordingCanvas.height);
-
-    // 自分の映像を右下に小さく描画（ピクチャーインピクチャー）
-    const localVideoWidth = recordingCanvas.width * 0.25; // 全体の25%の幅
+    const localVideoWidth = recordingCanvas.width * 0.25;
     const localVideoHeight = localVideo.videoHeight * (localVideoWidth / localVideo.videoWidth);
     const margin = 20;
     const x = recordingCanvas.width - localVideoWidth - margin;
     const y = recordingCanvas.height - localVideoHeight - margin;
-
     canvasContext.drawImage(localVideo, x, y, localVideoWidth, localVideoHeight);
-
-    // 次のフレームを描画するよう要求
     animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
 }
 
 function toggleRecording() {
     if (!isRecording) {
-        if (!isCallInProgress || !remoteVideo.srcObject || remoteVideo.videoWidth === 0) {
-            alert('相手との通話が開始され、映像が表示されてから録画を開始してください。');
+        if (!isCallInProgress || !isRemoteVideoReady) {
+            alert('相手との通話が開始され、映像が完全に表示されてから録画を開始してください。');
             return;
         }
 
         try {
-            // --- 音声の合成 (変更なし) ---
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const localAudioSource = audioContext.createMediaStreamSource(localStream);
             const remoteAudioSource = audioContext.createMediaStreamSource(remoteVideo.srcObject);
@@ -74,15 +161,10 @@ function toggleRecording() {
             remoteAudioSource.connect(mixedStreamDestination);
             const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
 
-            // --- 映像の合成 (Canvasを使用) ---
-            // Canvasの描画ループを開始
             animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
-            
-            // Canvasから映像ストリームをキャプチャ
-            const canvasStream = recordingCanvas.captureStream(30); // 30fpsでキャプチャ
+            const canvasStream = recordingCanvas.captureStream(30);
             const canvasVideoTrack = canvasStream.getVideoTracks()[0];
 
-            // --- 最終的なストリームの作成 ---
             const streamToRecord = new MediaStream([canvasVideoTrack, mixedAudioTrack]);
 
             recordedChunks = [];
@@ -129,7 +211,6 @@ function toggleRecording() {
         if (audioContext) {
             audioContext.close();
         }
-        // ▼▼▼ 変更点: 描画ループを停止 ▼▼▼
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
         }
@@ -141,25 +222,13 @@ function toggleRecording() {
     }
 }
 
-
-// ----- ここから下は、toggleRecording 以外の関数です (変更なし) -----
-// createPeerConnection, call, hangup, resetCallState, etc.
-// これらの関数は前回のコードと同じなので、ここでは省略します。
-// 実際には、これらの関数もファイル内に存在している必要があります。
-// 便宜上、以下に完全なコードを再度掲載します。
-
-// (ここから下は、前回のコードから変更のない部分です)
+// (以下、変更のない関数が続きます)
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
         console.log('Sent message:', message);
     }
 }
-createRoomButton.addEventListener('click', createNewRoom);
-callButton.addEventListener('click', handleCallButtonClick);
-micButton.addEventListener('click', () => toggleMic());
-videoButton.addEventListener('click', () => toggleVideo());
-
 function createNewRoom() {
     const newRoomId = uuid.v4();
     window.location.href = `/?room=${newRoomId}`;
@@ -265,45 +334,6 @@ function connectWebSocket() {
         }
     };
 }
-function createPeerConnection() {
-    if (pc) pc.close();
-    pc = new RTCPeerConnection(servers);
-    
-    pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
-        switch(pc.iceConnectionState) {
-            case 'connected':
-            case 'completed':
-                isCallInProgress = true;
-                updateCallButton(true);
-                callButton.disabled = false;
-                recordButton.disabled = false;
-                break;
-            case 'disconnected':
-            case 'failed':
-            case 'closed':
-                if (isCallInProgress) {
-                    resetCallState();
-                }
-                break;
-        }
-    };
-
-    pc.onicecandidate = event => {
-        if (event.candidate) sendMessage({ candidate: event.candidate });
-    };
-
-    pc.ontrack = event => {
-        if (remoteVideo.srcObject !== event.streams[0]) {
-            remoteVideo.srcObject = event.streams[0];
-            remoteVideo.play().catch(e => console.error('Remote video play failed:', e));
-        }
-    };
-    
-    if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-}
 async function call() {
     if (!pc || isNegotiating || isCallInProgress) return;
     try {
@@ -320,29 +350,6 @@ async function call() {
 function hangup() {
     sendMessage({ type: 'hangup' });
     resetCallState();
-}
-function resetCallState() {
-    console.log("Resetting call state.");
-    isCallInProgress = false;
-    isNegotiating = false;
-    if (pc) {
-        pc.close();
-        pc = null;
-    }
-    remoteVideo.srcObject = null;
-    updateCallButton(false);
-    
-    const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
-    callButton.disabled = (participantCount <= 1);
-    recordButton.disabled = true;
-    
-    if (isRecording) {
-        toggleRecording();
-    }
-
-    if (localStream) {
-        createPeerConnection();
-    }
 }
 function updateCallButton(isInProgress) {
     const label = callButton.querySelector('.label');

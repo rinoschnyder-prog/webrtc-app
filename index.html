@@ -5,8 +5,19 @@
     <title>WebRTC Video Chat</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-    /* 基本設定 (変更なし) */
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #202124; color: #ffffff; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+    /* 基本設定 */
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #202124;
+        color: #ffffff;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        overflow: hidden;
+    }
     #video-container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background-color: #000; }
     #participant-info { position: absolute; top: 20px; left: 20px; background-color: rgba(0, 0, 0, 0.5); padding: 8px 15px; border-radius: 8px; font-size: 16px; z-index: 10; }
     #remoteVideo { width: 100%; height: 100%; object-fit: contain; }
@@ -24,7 +35,7 @@
     #initial-view h1 { font-weight: 300; }
     #createRoomButton { padding: 15px 30px; font-size: 18px; border-radius: 8px; border: none; background-color: #8ab4f8; color: #202124; cursor: pointer; z-index: 10; }
 
-    /* ▼▼▼ 変更点: 設定パネルのスタイルを追加 ▼▼▼ */
+    /* 設定パネルのスタイル */
     #settingsPanel {
         position: absolute;
         bottom: 95px; /* コントロールバーの真上 */
@@ -80,7 +91,7 @@
         <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
 
-        <!-- ▼▼▼ 変更点: 設定パネルのUIを追加 ▼▼▼ -->
+        <!-- 設定パネルのUI -->
         <div id="settingsPanel">
             <div class="setting-item">
                 <label for="frameRateSelect">フレームレート:</label>
@@ -115,7 +126,7 @@
                 <div class="icon">⏺️</div>
                 <div class="label">録画</div>
             </button>
-            <!-- ▼▼▼ 変更点: 設定ボタンを追加 ▼▼▼ -->
+            <!-- 設定ボタン -->
             <button class="control-button" id="settingsButton" disabled>
                 <div class="icon">⚙️</div>
                 <div class="label">設定</div>

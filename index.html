@@ -1,4 +1,4 @@
-<!-- index.html の全体をこれで置き換えください -->
+<!-- index.html の全体をこれで置き換えてください -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -67,20 +67,17 @@
         padding: 10px 15px;
         border-radius: 50px;
         display: flex;
-        gap: 10px; /* ボタン間の隙間を少し詰める */
+        gap: 10px;
     }
 
-    /* ▼▼▼ 変更: ボタンのスタイルを全面的に修正 ▼▼▼ */
     .control-button {
         background-color: #3c4043;
         color: white;
         border: none;
-        /* ボタンの形状を縦長の円形に変更 */
         width: 80px;
         height: 60px;
         border-radius: 20px;
         cursor: pointer;
-        /* Flexboxでアイコンとラベルを縦に並べる */
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -91,12 +88,10 @@
     .control-button:hover { background-color: #5f6368; }
     .control-button:disabled { background-color: #282a2d; cursor: not-allowed; opacity: 0.5; }
 
-    /* アイコン部分のスタイル */
     .icon {
         font-size: 24px;
-        height: 28px; /* 高さを固定してガタつきを防ぐ */
+        height: 28px;
     }
-    /* ラベル部分のスタイル */
     .label {
         font-size: 10px;
         margin-top: 2px;
@@ -105,7 +100,6 @@
     #callButton { background-color: #33a853; }
     #callButton.hangup { background-color: #ea4335; }
 
-    /* 初期画面用のスタイル */
     #initial-view { text-align: center; }
     #initial-view h1 { font-weight: 300; }
     #createRoomButton {
@@ -148,10 +142,11 @@
         
         <div id="participant-info" style="display: none;">参加人数: 1人</div>
 
-        <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
+        <!-- ▼▼▼ 変更: remoteVideoに "muted" 属性を追加 ▼▼▼ -->
+        <video id="remoteVideo" autoplay muted playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
+        
         <div id="controls" style="display: none;">
-            <!-- ▼▼▼ 変更: ボタンの構造をアイコンとラベルの二階建てに変更 ▼▼▼ -->
             <button class="control-button" id="micButton" disabled>
                 <div class="icon">🎤</div>
                 <div class="label">マイク</div>

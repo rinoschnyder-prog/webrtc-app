@@ -12,22 +12,19 @@ app.use(express.static(__dirname));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ルームごとのクライアントを管理するオブジェクト
 const rooms = {};
 
-// 指定されたルームのクライアントリストを取得するヘルパー関数
 function getClientsInRoom(room) {
     return rooms[room] || [];
 }
 
-// ルームの参加人数をそのルームの全員にブロードキャストする関数
 function broadcastParticipantCount(room) {
     const clients = getClientsInRoom(room);
     const count = clients.length;
     const message = JSON.stringify({ type: 'count', count });
     
     clients.forEach(client => {
-        if (client.readyState === 1) { // WebSocket.OPEN
+        if (client.readyState === 1) {
             client.send(message);
         }
     });
@@ -42,36 +39,38 @@ wss.on('connection', (ws, req) => {
         return;
     }
 
-    // クライアントをルームに追加
     if (!rooms[room]) {
         rooms[room] = [];
     }
     rooms[room].push(ws);
-    ws.room = room; // wsオブジェクトにルーム情報を紐付け
+    ws.room = room;
 
     console.log(`クライアントがルームに参加しました: ${room}`);
 
-    // ▼▼▼ 変更点: 接続ロジックを明確化 ▼▼▼
-    // このクライアント以外の、同じルームにいるクライアントを取得
     const otherClients = getClientsInRoom(room).filter(client => client !== ws && client.readyState === 1);
 
-    // もしルームに他のクライアントがいたら（自分が2人目の場合）
     if (otherClients.length > 0) {
-        // 新しく接続してきたクライアント（自分自身）に、Offerを作成するよう指示
         ws.send(JSON.stringify({ type: 'create-offer' }));
-
-        // 先にいたクライアントに、新しいピアが参加したことを通知
         otherClients.forEach(client => {
             client.send(JSON.stringify({ type: 'peer-joined' }));
         });
     }
 
-    // 接続時に参加人数を全員に通知
     broadcastParticipantCount(room);
 
     ws.on('message', message => {
         const messageString = message.toString();
-        // 受信したメッセージを、送信者以外の同じルームのクライアントに転送
+        const parsedMessage = JSON.parse(messageString);
+
+        // ▼▼▼ 変更点: 再接続要求を処理するロジックを追加 ▼▼▼
+        if (parsedMessage.type === 'request-to-call') {
+            console.log(`ルーム[${room}]で再接続要求を受信`);
+            // 要求してきた本人にだけ、Offerを作成するよう指示を返す
+            ws.send(JSON.stringify({ type: 'create-offer' }));
+            return; // 他のクライアントには転送しない
+        }
+        
+        // 通常のメッセージは送信者以外の全員に転送
         getClientsInRoom(room).forEach(client => {
             if (client !== ws && client.readyState === 1) {
                 client.send(messageString);
@@ -82,15 +81,13 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
         console.log(`クライアントがルームから退出しました: ${room}`);
         
-        // クライアントをルームから削除
         if (rooms[room]) {
             rooms[room] = rooms[room].filter(client => client !== ws);
             if (rooms[room].length === 0) {
-                delete rooms[room]; // ルームが空になったら削除
+                delete rooms[room];
             }
         }
         
-        // 退出後、残っている人に人数を通知
         broadcastParticipantCount(room);
     });
 });

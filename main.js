@@ -21,7 +21,6 @@ const servers = {
     ]
 };
 
-// --- 初期化処理 ---
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
@@ -46,7 +45,6 @@ window.addEventListener('load', () => {
     }
 });
 
-// --- メインロジック ---
 async function startCallPreparation() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -56,15 +54,10 @@ async function startCallPreparation() {
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
         participantInfo.style.display = 'block';
-
-        // ▼▼▼ 変更点: ローカルストリーム取得後、すぐにマイクとビデオボタンを有効化 ▼▼▼
         micButton.disabled = false;
         videoButton.disabled = false;
-        // 「通話開始/終了」ボタンは、通話が始まるまで無効のまま（役割が「終了」のため）
-
-        toggleMic(true); // ボタンの初期状態を設定
-        toggleVideo(true); // ボタンの初期状態を設定
-        
+        toggleMic(true);
+        toggleVideo(true);
         connectWebSocket();
     } catch (e) {
         alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
@@ -74,6 +67,10 @@ async function startCallPreparation() {
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
+    } else {
+        // ▼▼▼ 変更点: 通話中でない場合、再接続要求を送信 ▼▼▼
+        console.log('Requesting to start a new call...');
+        sendMessage({ type: 'request-to-call' });
     }
 }
 
@@ -94,13 +91,13 @@ function connectWebSocket() {
             console.log('Received message:', message);
 
             if (message.type === 'create-offer') {
-                console.log('Received create-offer signal. Initiating call.');
                 call();
             } else if (message.type === 'peer-joined') {
                 console.log('Peer joined, waiting for offer.');
+                // ▼▼▼ 変更点: 相手が入室したら「通話開始」ボタンを有効化 ▼▼▼
+                callButton.disabled = false;
             } else if (message.offer) {
                 if (isNegotiating || pc.signalingState !== 'stable') return;
-                console.log('Received offer.');
                 isNegotiating = true;
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 const answer = await pc.createAnswer();
@@ -109,18 +106,21 @@ function connectWebSocket() {
                 isNegotiating = false;
             } else if (message.answer) {
                 if (pc.signalingState === 'have-local-offer') {
-                    console.log('Received answer.');
                     await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
                 }
             } else if (message.candidate) {
-                console.log('Received ICE candidate.');
                 try {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
                 } catch (e) {
                     if (pc.remoteDescription) console.error('Error adding received ice candidate', e);
                 }
             } else if (message.type === 'count') {
-                participantInfo.textContent = `参加人数: ${message.count}人`;
+                const count = message.count;
+                participantInfo.textContent = `参加人数: ${count}人`;
+                // ▼▼▼ 変更点: 参加人数に応じて「通話開始」ボタンの 상태を制御 ▼▼▼
+                if (!isCallInProgress) {
+                    callButton.disabled = (count <= 1);
+                }
             } else if (message.type === 'hangup') {
                 resetCallState();
             }
@@ -130,7 +130,6 @@ function connectWebSocket() {
     socket.onclose = () => {
         console.log('WebSocket disconnected.');
         resetCallState();
-        // WebSocketが切れたら全てのボタンを無効化
         callButton.disabled = true;
         micButton.disabled = true;
         videoButton.disabled = true;
@@ -148,7 +147,7 @@ function createPeerConnection() {
             case 'completed':
                 isCallInProgress = true;
                 updateCallButton(true);
-                callButton.disabled = false; // 通話が確立したら「通話終了」ボタンを有効化
+                callButton.disabled = false;
                 break;
             case 'disconnected':
             case 'failed':
@@ -161,15 +160,10 @@ function createPeerConnection() {
     };
 
     pc.onicecandidate = event => {
-        if (event.candidate) {
-            sendMessage({ candidate: event.candidate });
-        } else {
-            console.log('All ICE candidates have been sent.');
-        }
+        if (event.candidate) sendMessage({ candidate: event.candidate });
     };
 
     pc.ontrack = event => {
-        console.log('Remote track received.');
         if (remoteVideo.srcObject !== event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
             remoteVideo.play().catch(e => console.error('Remote video play failed:', e));
@@ -182,13 +176,9 @@ function createPeerConnection() {
 }
 
 async function call() {
-    if (!pc || isNegotiating || isCallInProgress) {
-        console.warn("Call aborted. PC not ready, negotiating, or call already in progress.");
-        return;
-    }
+    if (!pc || isNegotiating || isCallInProgress) return;
     try {
         isNegotiating = true;
-        console.log("Creating offer...");
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendMessage({ offer: pc.localDescription });
@@ -214,7 +204,10 @@ function resetCallState() {
     }
     remoteVideo.srcObject = null;
     updateCallButton(false);
-    callButton.disabled = true; // 通話終了後は「通話終了」ボタンを再度無効化
+    
+    // ▼▼▼ 変更点: 通話終了後、参加者が2人いれば再度通話できるようにボタンを有効化 ▼▼▼
+    const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
+    callButton.disabled = (participantCount <= 1);
     
     if (localStream) {
         createPeerConnection();
@@ -223,11 +216,14 @@ function resetCallState() {
 
 function updateCallButton(isInProgress) {
     const label = callButton.querySelector('.label');
+    const icon = callButton.querySelector('.icon');
     if (isInProgress) {
         callButton.classList.add('hangup');
+        icon.textContent = '📞'; // アイコンを元に戻す（スタイルで色が変わる）
         label.textContent = '通話終了';
     } else {
         callButton.classList.remove('hangup');
+        icon.textContent = '📞';
         label.textContent = '通話開始';
     }
 }

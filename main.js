@@ -157,7 +157,6 @@ function createPeerConnection() {
     
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
-        // ▼▼▼ 修正点: 'iceConnectionstate' -> 'iceConnectionState' に修正 ▼▼▼
         switch(pc.iceConnectionState) {
             case 'connected':
             case 'completed':
@@ -289,7 +288,6 @@ function toggleVideo(isInitial = false) {
 
 function toggleRecording() {
     if (!isRecording) {
-        // --- 録画開始 ---
         if (!isCallInProgress || !remoteVideo.srcObject) {
             alert('相手との通話が開始されてから録画を開始してください。');
             return;
@@ -298,13 +296,14 @@ function toggleRecording() {
         try {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const localAudioSource = audioContext.createMediaStreamSource(localStream);
-            const remoteAudioStream = remoteVideo.srcObject;
-            const remoteAudioSource = audioContext.createMediaStreamSource(remoteAudioStream);
+            const remoteAudioSource = audioContext.createMediaStreamSource(remoteVideo.srcObject);
             mixedStreamDestination = audioContext.createMediaStreamDestination();
             localAudioSource.connect(mixedStreamDestination);
             remoteAudioSource.connect(mixedStreamDestination);
 
-            const videoTrack = remoteAudioStream.getVideoTracks()[0];
+            // ▼▼▼ 唯一の、しかし最も重要な変更点 ▼▼▼
+            // 録画する映像を、相手(remote)から自分(local)のストリームの映像トラックに切り替える
+            const videoTrack = localStream.getVideoTracks()[0]; 
             const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
             const streamToRecord = new MediaStream([videoTrack, mixedAudioTrack]);
 
@@ -346,7 +345,6 @@ function toggleRecording() {
         }
 
     } else {
-        // --- 録画停止 ---
         if (mediaRecorder) {
             mediaRecorder.stop();
         }

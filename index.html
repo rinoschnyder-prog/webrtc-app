@@ -99,6 +99,8 @@
 
     #callButton { background-color: #33a853; }
     #callButton.hangup { background-color: #ea4335; }
+    #recordButton.recording { background-color: #ea4335; } /* 録画中の色 */
+
 
     #initial-view { text-align: center; }
     #initial-view h1 { font-weight: 300; }
@@ -142,7 +144,6 @@
         
         <div id="participant-info" style="display: none;">参加人数: 1人</div>
 
-        <!-- ▼▼▼ 変更点: remoteVideoから "muted" 属性を削除 ▼▼▼ -->
         <video id="remoteVideo" autoplay playsinline style="display: none;"></video>
         <video id="localVideo" autoplay muted playsinline></video>
         
@@ -158,6 +159,11 @@
             <button class="control-button" id="videoButton" disabled>
                 <div class="icon">📹</div>
                 <div class="label">ビデオ</div>
+            </button>
+            <!-- ▼▼▼ 変更点: 録画ボタンを追加 ▼▼▼ -->
+            <button class="control-button" id="recordButton" disabled>
+                <div class="icon">⏺️</div>
+                <div class="label">録画</div>
             </button>
         </div>
     </div>

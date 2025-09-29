@@ -16,7 +16,7 @@ let isCallInProgress = false;
 
 const servers = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }, // ポートを19302に変更 (より一般的)
+        { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
     ]
 };
@@ -25,7 +25,7 @@ const servers = {
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
-        console.log('Sent message:', message); // 送信ログ
+        console.log('Sent message:', message);
     }
 }
 
@@ -56,8 +56,15 @@ async function startCallPreparation() {
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
         participantInfo.style.display = 'block';
-        toggleMic(true);
-        toggleVideo(true);
+
+        // ▼▼▼ 変更点: ローカルストリーム取得後、すぐにマイクとビデオボタンを有効化 ▼▼▼
+        micButton.disabled = false;
+        videoButton.disabled = false;
+        // 「通話開始/終了」ボタンは、通話が始まるまで無効のまま（役割が「終了」のため）
+
+        toggleMic(true); // ボタンの初期状態を設定
+        toggleVideo(true); // ボタンの初期状態を設定
+        
         connectWebSocket();
     } catch (e) {
         alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
@@ -67,36 +74,30 @@ async function startCallPreparation() {
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
-    } else {
-        // 手動での発信はサーバーからの指示で行うため、このボタンからは基本的に切断のみ
-        console.warn("Manual call initiation is disabled. Call starts automatically.");
     }
 }
 
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
-    const wsProtocol = 'wss:'; // Render.comはwssを強制するため
+    const wsProtocol = 'wss:';
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
         console.log('WebSocket connected.');
         createPeerConnection();
-        // ボタンは接続が確立してから有効化する
     };
 
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
-            console.log('Received message:', message); // 受信ログ
+            console.log('Received message:', message);
 
-            // ▼▼▼ 変更点: サーバーからの指示に基づいて動作 ▼▼▼
             if (message.type === 'create-offer') {
                 console.log('Received create-offer signal. Initiating call.');
                 call();
             } else if (message.type === 'peer-joined') {
                 console.log('Peer joined, waiting for offer.');
-                // 相手からのOfferを待つ
             } else if (message.offer) {
                 if (isNegotiating || pc.signalingState !== 'stable') return;
                 console.log('Received offer.');
@@ -113,7 +114,6 @@ function connectWebSocket() {
                 }
             } else if (message.candidate) {
                 console.log('Received ICE candidate.');
-                // リモートdescriptionが設定される前にcandidateが届くことがあるため、キューイングはしないが、エラーは握りつぶす
                 try {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
                 } catch (e) {
@@ -130,6 +130,7 @@ function connectWebSocket() {
     socket.onclose = () => {
         console.log('WebSocket disconnected.');
         resetCallState();
+        // WebSocketが切れたら全てのボタンを無効化
         callButton.disabled = true;
         micButton.disabled = true;
         videoButton.disabled = true;
@@ -147,10 +148,7 @@ function createPeerConnection() {
             case 'completed':
                 isCallInProgress = true;
                 updateCallButton(true);
-                // ボタンを有効化
-                callButton.disabled = false;
-                micButton.disabled = false;
-                videoButton.disabled = false;
+                callButton.disabled = false; // 通話が確立したら「通話終了」ボタンを有効化
                 break;
             case 'disconnected':
             case 'failed':
@@ -216,8 +214,8 @@ function resetCallState() {
     }
     remoteVideo.srcObject = null;
     updateCallButton(false);
+    callButton.disabled = true; // 通話終了後は「通話終了」ボタンを再度無効化
     
-    // ピア接続を再作成して次の接続に備える
     if (localStream) {
         createPeerConnection();
     }

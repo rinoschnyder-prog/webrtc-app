@@ -11,6 +11,11 @@ const initialView = document.getElementById('initial-view');
 const controls = document.getElementById('controls');
 const participantInfo = document.getElementById('participant-info');
 
+// ▼▼▼ 変更点: Canvas関連の変数を追加 ▼▼▼
+const recordingCanvas = document.getElementById('recordingCanvas');
+const canvasContext = recordingCanvas.getContext('2d');
+let animationFrameId;
+
 let localStream, pc, socket;
 let isNegotiating = false;
 let isCallInProgress = false;
@@ -28,31 +33,143 @@ const servers = {
     ]
 };
 
+// ... (sendMessage, createRoomButton, callButtonなどのイベントリスナーは変更なし) ...
+
+// ▼▼▼ 変更点: Canvas描画ループ関数を追加 ▼▼▼
+function drawVideosOnCanvas() {
+    // キャンバスを相手の映像のサイズに合わせる
+    recordingCanvas.width = remoteVideo.videoWidth;
+    recordingCanvas.height = remoteVideo.videoHeight;
+
+    // 相手の映像を大きく描画
+    canvasContext.drawImage(remoteVideo, 0, 0, recordingCanvas.width, recordingCanvas.height);
+
+    // 自分の映像を右下に小さく描画（ピクチャーインピクチャー）
+    const localVideoWidth = recordingCanvas.width * 0.25; // 全体の25%の幅
+    const localVideoHeight = localVideo.videoHeight * (localVideoWidth / localVideo.videoWidth);
+    const margin = 20;
+    const x = recordingCanvas.width - localVideoWidth - margin;
+    const y = recordingCanvas.height - localVideoHeight - margin;
+
+    canvasContext.drawImage(localVideo, x, y, localVideoWidth, localVideoHeight);
+
+    // 次のフレームを描画するよう要求
+    animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
+}
+
+function toggleRecording() {
+    if (!isRecording) {
+        if (!isCallInProgress || !remoteVideo.srcObject || remoteVideo.videoWidth === 0) {
+            alert('相手との通話が開始され、映像が表示されてから録画を開始してください。');
+            return;
+        }
+
+        try {
+            // --- 音声の合成 (変更なし) ---
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const localAudioSource = audioContext.createMediaStreamSource(localStream);
+            const remoteAudioSource = audioContext.createMediaStreamSource(remoteVideo.srcObject);
+            mixedStreamDestination = audioContext.createMediaStreamDestination();
+            localAudioSource.connect(mixedStreamDestination);
+            remoteAudioSource.connect(mixedStreamDestination);
+            const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
+
+            // --- 映像の合成 (Canvasを使用) ---
+            // Canvasの描画ループを開始
+            animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
+            
+            // Canvasから映像ストリームをキャプチャ
+            const canvasStream = recordingCanvas.captureStream(30); // 30fpsでキャプチャ
+            const canvasVideoTrack = canvasStream.getVideoTracks()[0];
+
+            // --- 最終的なストリームの作成 ---
+            const streamToRecord = new MediaStream([canvasVideoTrack, mixedAudioTrack]);
+
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm; codecs=vp8,opus' });
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `webrtc_call_recording_${new Date().toISOString()}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+                recordedChunks = [];
+            };
+
+            mediaRecorder.start(1000);
+            isRecording = true;
+            recordButton.classList.add('recording');
+            recordButton.querySelector('.label').textContent = '録画停止';
+            recordButton.querySelector('.icon').textContent = '⏹️';
+            console.log('合成映像の録画を開始しました。');
+
+        } catch (e) {
+            console.error('録画の開始に失敗しました:', e);
+            alert('録画の開始に失敗しました。詳細はコンソールを確認してください。');
+        }
+
+    } else {
+        if (mediaRecorder) {
+            mediaRecorder.stop();
+        }
+        if (audioContext) {
+            audioContext.close();
+        }
+        // ▼▼▼ 変更点: 描画ループを停止 ▼▼▼
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+        }
+        isRecording = false;
+        recordButton.classList.remove('recording');
+        recordButton.querySelector('.label').textContent = '録画';
+        recordButton.querySelector('.icon').textContent = '⏺️';
+        console.log('合成映像の録画を停止しました。');
+    }
+}
+
+
+// ----- ここから下は、toggleRecording 以外の関数です (変更なし) -----
+// createPeerConnection, call, hangup, resetCallState, etc.
+// これらの関数は前回のコードと同じなので、ここでは省略します。
+// 実際には、これらの関数もファイル内に存在している必要があります。
+// 便宜上、以下に完全なコードを再度掲載します。
+
+// (ここから下は、前回のコードから変更のない部分です)
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
         console.log('Sent message:', message);
     }
 }
-
 createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
-recordButton.addEventListener('click', () => toggleRecording());
 
 function createNewRoom() {
     const newRoomId = uuid.v4();
     window.location.href = `/?room=${newRoomId}`;
 }
-
 window.addEventListener('load', () => {
     const room = new URL(window.location.href).searchParams.get('room');
     if (room) {
         startCallPreparation();
     }
 });
-
 async function startCallPreparation() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -71,7 +188,6 @@ async function startCallPreparation() {
         alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
     }
 }
-
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
@@ -80,7 +196,6 @@ function handleCallButtonClick() {
         sendMessage({ type: 'request-to-call' });
     }
 }
-
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
     const wsProtocol = 'wss:';
@@ -150,7 +265,6 @@ function connectWebSocket() {
         }
     };
 }
-
 function createPeerConnection() {
     if (pc) pc.close();
     pc = new RTCPeerConnection(servers);
@@ -190,7 +304,6 @@ function createPeerConnection() {
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 }
-
 async function call() {
     if (!pc || isNegotiating || isCallInProgress) return;
     try {
@@ -204,12 +317,10 @@ async function call() {
         isNegotiating = false;
     }
 }
-
 function hangup() {
     sendMessage({ type: 'hangup' });
     resetCallState();
 }
-
 function resetCallState() {
     console.log("Resetting call state.");
     isCallInProgress = false;
@@ -233,7 +344,6 @@ function resetCallState() {
         createPeerConnection();
     }
 }
-
 function updateCallButton(isInProgress) {
     const label = callButton.querySelector('.label');
     const icon = callButton.querySelector('.icon');
@@ -247,7 +357,6 @@ function updateCallButton(isInProgress) {
         label.textContent = '通話開始';
     }
 }
-
 function toggleMic(isInitial = false) {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -266,7 +375,6 @@ function toggleMic(isInitial = false) {
         }
     }
 }
-
 function toggleVideo(isInitial = false) {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];
@@ -283,78 +391,5 @@ function toggleVideo(isInitial = false) {
             label.textContent = 'ビデオ開始';
             videoButton.style.backgroundColor = '#ea4335';
         }
-    }
-}
-
-function toggleRecording() {
-    if (!isRecording) {
-        if (!isCallInProgress || !remoteVideo.srcObject) {
-            alert('相手との通話が開始されてから録画を開始してください。');
-            return;
-        }
-
-        try {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const localAudioSource = audioContext.createMediaStreamSource(localStream);
-            const remoteAudioSource = audioContext.createMediaStreamSource(remoteVideo.srcObject);
-            mixedStreamDestination = audioContext.createMediaStreamDestination();
-            localAudioSource.connect(mixedStreamDestination);
-            remoteAudioSource.connect(mixedStreamDestination);
-
-            // ▼▼▼ 唯一の、しかし最も重要な変更点 ▼▼▼
-            // 録画する映像を、相手(remote)から自分(local)のストリームの映像トラックに切り替える
-            const videoTrack = localStream.getVideoTracks()[0]; 
-            const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
-            const streamToRecord = new MediaStream([videoTrack, mixedAudioTrack]);
-
-            recordedChunks = [];
-            mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm; codecs=vp8,opus' });
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    recordedChunks.push(event.data);
-                }
-            };
-
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `webrtc_conversation_${new Date().toISOString()}.webm`;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 100);
-                recordedChunks = [];
-            };
-
-            mediaRecorder.start(1000);
-            isRecording = true;
-            recordButton.classList.add('recording');
-            recordButton.querySelector('.label').textContent = '録画停止';
-            recordButton.querySelector('.icon').textContent = '⏹️';
-            console.log('会話の録画を開始しました。');
-
-        } catch (e) {
-            console.error('録画の開始に失敗しました:', e);
-            alert('録画の開始に失敗しました。詳細はコンソールを確認してください。');
-        }
-
-    } else {
-        if (mediaRecorder) {
-            mediaRecorder.stop();
-        }
-        if (audioContext) {
-            audioContext.close();
-        }
-        isRecording = false;
-        recordButton.classList.remove('recording');
-        recordButton.querySelector('.label').textContent = '録画';
-        recordButton.querySelector('.icon').textContent = '⏺️';
-        console.log('会話の録画を停止しました。');
     }
 }

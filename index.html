@@ -136,6 +136,9 @@
 </style>
 </head>
 <body>
+    <!-- 録画合成用の、画面には表示されないCanvas要素 -->
+    <canvas id="recordingCanvas" style="display: none;"></canvas>
+
     <div id="video-container">
         <div id="initial-view">
             <h1>WebRTC Video Chat</h1>
@@ -160,7 +163,6 @@
                 <div class="icon">📹</div>
                 <div class="label">ビデオ</div>
             </button>
-            <!-- ▼▼▼ 変更点: 録画ボタンを追加 ▼▼▼ -->
             <button class="control-button" id="recordButton" disabled>
                 <div class="icon">⏺️</div>
                 <div class="label">録画</div>

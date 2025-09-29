@@ -19,7 +19,7 @@ let isCallInProgress = false;
 let mediaRecorder;
 let recordedChunks = [];
 let isRecording = false;
-let audioContext, mixedStreamDestination; // Web Audio API用の変数を追加
+let audioContext, mixedStreamDestination;
 
 const servers = {
     iceServers: [
@@ -64,7 +64,6 @@ async function startCallPreparation() {
         participantInfo.style.display = 'block';
         micButton.disabled = false;
         videoButton.disabled = false;
-        // 録画ボタンは、通話が開始してから有効にする
         toggleMic(true);
         toggleVideo(true);
         connectWebSocket();
@@ -158,13 +157,14 @@ function createPeerConnection() {
     
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
+        // ▼▼▼ 修正点: 'iceConnectionstate' -> 'iceConnectionState' に修正 ▼▼▼
         switch(pc.iceConnectionState) {
             case 'connected':
             case 'completed':
                 isCallInProgress = true;
                 updateCallButton(true);
                 callButton.disabled = false;
-                recordButton.disabled = false; // ▼▼▼ 変更点: 通話が確立したら録画ボタンを有効化 ▼▼▼
+                recordButton.disabled = false;
                 break;
             case 'disconnected':
             case 'failed':
@@ -224,7 +224,7 @@ function resetCallState() {
     
     const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
     callButton.disabled = (participantCount <= 1);
-    recordButton.disabled = true; // ▼▼▼ 変更点: 通話終了で録画ボタンを無効化 ▼▼▼
+    recordButton.disabled = true;
     
     if (isRecording) {
         toggleRecording();
@@ -250,49 +250,64 @@ function updateCallButton(isInProgress) {
 }
 
 function toggleMic(isInitial = false) {
-    // ... (この関数は変更なし)
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    const icon = micButton.querySelector('.icon');
+    const label = micButton.querySelector('.label');
+    if (audioTrack) {
+        if (!isInitial) audioTrack.enabled = !audioTrack.enabled;
+        if (audioTrack.enabled) {
+            icon.textContent = '🎤';
+            label.textContent = 'ミュート';
+            micButton.style.backgroundColor = '#3c4043';
+        } else {
+            icon.textContent = '🔇';
+            label.textContent = 'ミュート解除';
+            micButton.style.backgroundColor = '#ea4335';
+        }
+    }
 }
 
 function toggleVideo(isInitial = false) {
-    // ... (この関数は変更なし)
+    if (!localStream) return;
+    const videoTrack = localStream.getVideoTracks()[0];
+    const icon = videoButton.querySelector('.icon');
+    const label = videoButton.querySelector('.label');
+    if (videoTrack) {
+        if (!isInitial) videoTrack.enabled = !videoTrack.enabled;
+        if (videoTrack.enabled) {
+            icon.textContent = '📹';
+            label.textContent = 'ビデオ停止';
+            videoButton.style.backgroundColor = '#3c4043';
+        } else {
+            icon.textContent = '🚫';
+            label.textContent = 'ビデオ開始';
+            videoButton.style.backgroundColor = '#ea4335';
+        }
+    }
 }
 
-// ▼▼▼ 変更点: 録画ロジックを大幅に書き換え ▼▼▼
 function toggleRecording() {
     if (!isRecording) {
         // --- 録画開始 ---
-
-        // 通話中でなければ録画できないようにする
         if (!isCallInProgress || !remoteVideo.srcObject) {
             alert('相手との通話が開始されてから録画を開始してください。');
             return;
         }
 
         try {
-            // 1. Web Audio APIを使って音声ストリームを合成
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            
-            // 自分の音声ソースを作成
             const localAudioSource = audioContext.createMediaStreamSource(localStream);
-            
-            // 相手の音声ソースを作成
             const remoteAudioStream = remoteVideo.srcObject;
             const remoteAudioSource = audioContext.createMediaStreamSource(remoteAudioStream);
-            
-            // 合成した音声の出力先を作成
             mixedStreamDestination = audioContext.createMediaStreamDestination();
-            
-            // 両方の音声を一つの出力先に接続（ミックス）
             localAudioSource.connect(mixedStreamDestination);
             remoteAudioSource.connect(mixedStreamDestination);
 
-            // 2. 録画用の新しいストリームを作成
-            // 映像は相手のもの、音声は合成したものを使用
             const videoTrack = remoteAudioStream.getVideoTracks()[0];
             const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
             const streamToRecord = new MediaStream([videoTrack, mixedAudioTrack]);
 
-            // 3. MediaRecorderを初期化
             recordedChunks = [];
             mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm; codecs=vp8,opus' });
 
@@ -336,7 +351,6 @@ function toggleRecording() {
             mediaRecorder.stop();
         }
         if (audioContext) {
-            // AudioContextを閉じてリソースを解放
             audioContext.close();
         }
         isRecording = false;

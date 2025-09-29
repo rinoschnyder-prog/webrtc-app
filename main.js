@@ -11,7 +11,7 @@ const controls = document.getElementById('controls');
 const participantInfo = document.getElementById('participant-info');
 
 let localStream, pc, socket;
-let isNegotiating = false; // ▼▼▼ 追加: 交渉中の状態を管理するフラグ ▼▼▼
+let isNegotiating = false;
 
 const servers = {
     iceServers: [
@@ -27,7 +27,7 @@ function sendMessage(message) {
 }
 
 createRoomButton.addEventListener('click', createNewRoom);
-callButton.addEventListener('click', handleCallButtonClick);
+callButton.addEventListener('click', handleCallButtonClick); // ← この関数の内容を修正します
 micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
 
@@ -58,9 +58,12 @@ async function startCall() {
 }
 
 let isCallInProgress = false;
+// ▼▼▼ 変更: 手動での通話開始機能を復活させる ▼▼▼
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
+    } else {
+        call(); // この行を復活させます
     }
 }
 
@@ -86,11 +89,7 @@ function connectWebSocket() {
                 console.log('Received ready signal. Initiating call.');
                 call();
             } else if (message.offer) {
-                // ▼▼▼ 変更: 交渉中の場合は相手のOfferを無視（グレア対策） ▼▼▼
-                if (isNegotiating) {
-                    console.log("Ignoring offer during negotiation.");
-                    return;
-                }
+                if (isNegotiating) return;
                 if (!pc) createPeerConnection();
                 isNegotiating = true;
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
@@ -103,7 +102,6 @@ function connectWebSocket() {
             } else if (message.answer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
             } else if (message.candidate) {
-                // ICE候補はキューイングせずに直接追加を試みる
                 if (pc && pc.remoteDescription) {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
                 }
@@ -196,7 +194,7 @@ function updateCallButton(isInProgress) {
         label.textContent = '通話終了';
     } else {
         callButton.classList.remove('hangup');
-        label.textContent = '待機中'; // ラベルをより分かりやすく
+        label.textContent = '通話開始'; // ラベルを元に戻す
     }
 }
 

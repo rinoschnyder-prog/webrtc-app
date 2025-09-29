@@ -96,13 +96,10 @@ function connectWebSocket() {
                 isCallInProgress = true;
                 updateCallButton(true);
             } else if (message.answer) {
-                // ▼▼▼ 変更: 状態が正しい時のみAnswerを設定する「門番」を追加 ▼▼▼
                 if (pc.signalingState === 'have-local-offer') {
                     await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
                     for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
                     remoteCandidatesQueue = [];
-                } else {
-                    console.warn('Received an answer in an unexpected state:', pc.signalingState);
                 }
             } else if (message.candidate) {
                 if (pc && pc.remoteDescription) {
@@ -152,10 +149,18 @@ function createPeerConnection() {
         }
     };
 
+    // ▼▼▼ 変更: ここが最後の修正です ▼▼▼
     pc.ontrack = event => {
         console.log('Remote track received.');
         if (remoteVideo.srcObject !== event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
+            
+            // 再生を強制的に開始する
+            remoteVideo.play().catch(error => {
+                console.error('Remote video play failed:', error);
+                // ここでエラーが出た場合、ユーザーに再生ボタンを押してもらうなどのUIが必要
+                alert('相手のビデオの自動再生に失敗しました。画面をクリックすると再生される可能性があります。');
+            });
         }
     };
 }

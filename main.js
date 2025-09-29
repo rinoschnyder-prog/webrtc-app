@@ -12,6 +12,7 @@ const participantInfo = document.getElementById('participant-info');
 
 let localStream, pc, socket;
 let isNegotiating = false;
+let isCallInProgress = false;
 
 const servers = {
     iceServers: [
@@ -57,12 +58,11 @@ async function startCall() {
     }
 }
 
-let isCallInProgress = false;
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
     } else {
-        call();
+        call(); // 手動での発信機能を維持
     }
 }
 
@@ -84,7 +84,9 @@ function connectWebSocket() {
         try {
             const message = JSON.parse(event.data);
             
-            if (message.type === 'ready' && !isCallInProgress) {
+            if (message.type === 'ready') {
+                // ▼▼▼ 変更: isCallInProgressチェックを削除し、確実にcallを呼び出す ▼▼▼
+                console.log('Received ready signal. Initiating call.');
                 call();
             } else if (message.offer) {
                 if (isNegotiating || pc.signalingState !== 'stable') return;
@@ -123,6 +125,7 @@ function createPeerConnection() {
     pc = new RTCPeerConnection(servers);
     
     pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state change: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             isCallInProgress = true;
             updateCallButton(true);
@@ -133,15 +136,9 @@ function createPeerConnection() {
         if (event.candidate) sendMessage({ candidate: event.candidate });
     };
 
-    // ▼▼▼ 変更: ontackのロジックを修正 ▼▼▼
     pc.ontrack = event => {
-        // すでにストリームが設定されている場合は、何もしない
-        if (remoteVideo.srcObject) {
-            return;
-        }
-        console.log('First remote track received. Setting stream.');
+        if (remoteVideo.srcObject) return;
         remoteVideo.srcObject = event.streams[0];
-        // autoplay属性に再生を任せる
     };
     
     if (localStream) {
@@ -150,9 +147,10 @@ function createPeerConnection() {
 }
 
 async function call() {
-    if (!pc || isNegotiating) return;
+    if (!pc || isNegotiating || isCallInProgress) return; // 既に通話中なら何もしない
     try {
         isNegotiating = true;
+        console.log("Creating offer...");
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendMessage({ offer: pc.localDescription });

@@ -1,30 +1,41 @@
 プロジェクト概要:
-WebRTCを使った完全無料のビデオ通話Webアプリケーションを開発。PCとiPhone（スマートフォン）のブラウザ間で動作する。
-現在の状態:
-ほぼ完成。以下の機能が実装済み。
-ビデオ・音声の双方向通信: WebRTC (P2P + 無料TURNサーバー) を利用。
-シグナリングサーバー: Node.js (Express + ws) で実装。
-クラウドデプロイ: Render.comにデプロイ済み。公開URLは https://webrtc-app-a8x4.onrender.com/
-ルーム機能: URLのクエリパラメータ (?room=...) で部屋を区別。
-ランダムルーム名生成機能: トップページからuuidライブラリ（CDN経由）を使ってランダムなルームURLを生成し、リダイレクトする。手動でのルーム名指定も可能。
-基本UI:
-トップページ: 「新しいビデオ通話を開始する」ボタン。
-通話画面: 相手の映像(メイン)、自分の映像(ワイプ)、操作ボタン（マイクミュート、ビデオオフ、通話開始/終了）を配置。
-利用技術スタック:
-フロントエンド: HTML, CSS, JavaScript (Vanilla JS)
-バックエンド: Node.js, Express, ws (WebSocket)
-WebRTC関連:
-STUN: stun:stun.l.google.com:1932
-TURN: turn:openrelay.metered.ca:80 (Open Relay Project)
-デプロイ環境:
-ホスティング: Render.com (無料プラン)
-ソース管理: Git / GitHub
-外部ライブラリ: uuid (CDN経由で読み込み)
-最終的なファイル構成とコード:
-（以下は、私自身が思い出すためのメモです。あなたが貼り付ける必要はありませんが、私がこの情報を持っていることを示します）
-index.html: CDNからuuidを読み込み、トップページと通話画面のUIを持つ。
-main.js: ランダムルーム生成、WebRTCの接続ロジック、UI操作の全てを記述。WebSocketは常にwss:で接続。
-server.js: Render用に最適化されたシンプルなHTTPサーバー。node_modulesの配信は不要。
-package.json: express, ws, uuidを依存関係に持つ。"start": "node server.js"スクリプトを定義。
-直前の課題:
-「新しいビデオ通話を開始する」ボタンが反応しない問題を、uuidライブラリの読み込みをローカルのnode_modulesからCDNに変更することで解決した。
+WebRTCを利用した、完全無料で動作するリアルタイム・ビデオ通話Webアプリケーション。PCとスマートフォンのブラウザ間でP2P通信を行う。
+現在の状態: 完成
+全ての基本機能と、セキュリティ及びUI/UXの改善が完了した最終バージョン。
+公開URL:
+https://webrtc-app-a8x4.onrender.com/
+コア機能と最終仕様:
+ビデオ・音声通信: WebRTCによるP2P通信。STUNサーバーと無料のTURNサーバーを利用し、異なるネットワーク間の接続成功率を高めている。
+シグナリング: Node.js (Express + ws) で実装したWebSocketサーバーが、接続の仲介を行う。
+クラウドデプロイ: Render.comの無料プランでホスティング。15分間の無通信でスリープするが、アクセスがあれば自動で復帰する。
+ルーム機能: URLのクエリパラメータ (?room=...) を使って、通話相手を区別する。
+ランダムルーム名生成 (セキュリティ対策):
+トップページ (/) にアクセスすると「新しいビデオ通話を開始する」ボタンが表示される。
+ボタンを押すと、uuidライブラリを使って推測不可能なランダムなルーム名を生成し、そのURL (/?room=...) に自動でリダイレクトする。
+手動ルーム名指定: 従来の /?room=my-room のように、URLを直接作成して特定の部屋に入ることも可能。
+レスポンシブUI:
+PC、スマートフォンなど、様々な画面サイズに対応したレスポンシブデザイン。
+相手の映像は object-fit: contain を使用し、アスペクト比を保ったまま全体が必ず表示される（上下または左右に黒帯が出る）。
+通話コントロール:
+マイクのミュート/ミュート解除
+ビデオのオン/オフ（相手には黒画面が送られる）
+通話の開始 (Call) / 終了 (Hang Up) を兼用したボタン。
+技術スタック:
+フロントエンド: Vanilla JavaScript, HTML, CSS
+バックエンド: Node.js, Express, ws
+WebRTCサーバー:
+STUN: Google Public STUN (stun:stun.l.google.com:1932)
+TURN: Open Relay Project (turn:openrelay.metered.ca:80)
+デプロイ: Render.com (GitHub連携による自動デプロイ)
+外部ライブラリ: uuid (cdnjsのCDNから読み込み)
+最終的なファイルの状態:
+index.html: UIの骨格と全てのCSSを記述。CDNからuuidを読み込む。
+main.js: 全てのフロントエンドロジックを管理。URLにルーム名があるか否かで初期画面と通話画面の表示を切り替える。WebSocketは常にwss:で接続。
+server.js: Render用に最適化されたシンプルなHTTPサーバー。静的ファイル配信とWebSocketシグナリングのみを行う。
+package.json: 依存関係 (express, ws, uuid) と、Renderが使う起動コマンド "start": "node server.js" を定義。
+
+コードサイト
+https://github.com/rinoschnyder-prog/webrtc-app/tree/main
+
+サーバーサイト
+https://dashboard.render.com/

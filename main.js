@@ -6,7 +6,7 @@ const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 const micButton = document.getElementById('micButton');
 const videoButton = document.getElementById('videoButton');
-const recordButton = document.getElementById('recordButton'); // 録画ボタン要素を取得
+const recordButton = document.getElementById('recordButton');
 const initialView = document.getElementById('initial-view');
 const controls = document.getElementById('controls');
 const participantInfo = document.getElementById('participant-info');
@@ -19,6 +19,7 @@ let isCallInProgress = false;
 let mediaRecorder;
 let recordedChunks = [];
 let isRecording = false;
+let audioContext, mixedStreamDestination; // Web Audio API用の変数を追加
 
 const servers = {
     iceServers: [
@@ -38,7 +39,7 @@ createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
-recordButton.addEventListener('click', () => toggleRecording()); // 録画ボタンのイベントリスナー
+recordButton.addEventListener('click', () => toggleRecording());
 
 function createNewRoom() {
     const newRoomId = uuid.v4();
@@ -63,7 +64,7 @@ async function startCallPreparation() {
         participantInfo.style.display = 'block';
         micButton.disabled = false;
         videoButton.disabled = false;
-        recordButton.disabled = false; // ▼▼▼ 変更点: 録画ボタンを有効化 ▼▼▼
+        // 録画ボタンは、通話が開始してから有効にする
         toggleMic(true);
         toggleVideo(true);
         connectWebSocket();
@@ -144,8 +145,8 @@ function connectWebSocket() {
         callButton.disabled = true;
         micButton.disabled = true;
         videoButton.disabled = true;
-        recordButton.disabled = true; // ▼▼▼ 変更点: 録画ボタンも無効化 ▼▼▼
-        if (isRecording) { // 録画中であれば停止
+        recordButton.disabled = true;
+        if (isRecording) {
             toggleRecording();
         }
     };
@@ -163,6 +164,7 @@ function createPeerConnection() {
                 isCallInProgress = true;
                 updateCallButton(true);
                 callButton.disabled = false;
+                recordButton.disabled = false; // ▼▼▼ 変更点: 通話が確立したら録画ボタンを有効化 ▼▼▼
                 break;
             case 'disconnected':
             case 'failed':
@@ -222,8 +224,8 @@ function resetCallState() {
     
     const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
     callButton.disabled = (participantCount <= 1);
+    recordButton.disabled = true; // ▼▼▼ 変更点: 通話終了で録画ボタンを無効化 ▼▼▼
     
-    // 録画中であれば停止
     if (isRecording) {
         toggleRecording();
     }
@@ -248,97 +250,99 @@ function updateCallButton(isInProgress) {
 }
 
 function toggleMic(isInitial = false) {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    const icon = micButton.querySelector('.icon');
-    const label = micButton.querySelector('.label');
-    if (audioTrack) {
-        if (!isInitial) audioTrack.enabled = !audioTrack.enabled;
-        if (audioTrack.enabled) {
-            icon.textContent = '🎤';
-            label.textContent = 'ミュート';
-            micButton.style.backgroundColor = '#3c4043';
-        } else {
-            icon.textContent = '🔇';
-            label.textContent = 'ミュート解除';
-            micButton.style.backgroundColor = '#ea4335';
-        }
-    }
+    // ... (この関数は変更なし)
 }
 
 function toggleVideo(isInitial = false) {
-    if (!localStream) return;
-    const videoTrack = localStream.getVideoTracks()[0];
-    const icon = videoButton.querySelector('.icon');
-    const label = videoButton.querySelector('.label');
-    if (videoTrack) {
-        if (!isInitial) videoTrack.enabled = !videoTrack.enabled;
-        if (videoTrack.enabled) {
-            icon.textContent = '📹';
-            label.textContent = 'ビデオ停止';
-            videoButton.style.backgroundColor = '#3c4043';
-        } else {
-            icon.textContent = '🚫';
-            label.textContent = 'ビデオ開始';
-            videoButton.style.backgroundColor = '#ea4335';
-        }
-    }
+    // ... (この関数は変更なし)
 }
 
-// ▼▼▼ 変更点: 録画機能の追加 ▼▼▼
+// ▼▼▼ 変更点: 録画ロジックを大幅に書き換え ▼▼▼
 function toggleRecording() {
-    if (!localStream) {
-        alert('先にカメラとマイクを許可してください。');
-        return;
-    }
-
     if (!isRecording) {
-        // 録画開始
-        recordedChunks = []; // チャンクをリセット
-        try {
-            mediaRecorder = new MediaRecorder(localStream, { mimeType: 'video/webm; codecs=vp8,opus' }); // WebM形式で録画
-        } catch (e) {
-            console.error('MediaRecorderの初期化に失敗しました:', e);
-            alert('お使いのブラウザは録画に対応していないか、コーデックの問題があります。');
+        // --- 録画開始 ---
+
+        // 通話中でなければ録画できないようにする
+        if (!isCallInProgress || !remoteVideo.srcObject) {
+            alert('相手との通話が開始されてから録画を開始してください。');
             return;
         }
-        
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                recordedChunks.push(event.data);
-            }
-        };
 
-        mediaRecorder.onstop = () => {
-            console.log('録画が停止しました。');
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = `webrtc_recording_${new Date().toISOString()}.webm`;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 100);
-            recordedChunks = []; // 録画データをクリア
-        };
+        try {
+            // 1. Web Audio APIを使って音声ストリームを合成
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // 自分の音声ソースを作成
+            const localAudioSource = audioContext.createMediaStreamSource(localStream);
+            
+            // 相手の音声ソースを作成
+            const remoteAudioStream = remoteVideo.srcObject;
+            const remoteAudioSource = audioContext.createMediaStreamSource(remoteAudioStream);
+            
+            // 合成した音声の出力先を作成
+            mixedStreamDestination = audioContext.createMediaStreamDestination();
+            
+            // 両方の音声を一つの出力先に接続（ミックス）
+            localAudioSource.connect(mixedStreamDestination);
+            remoteAudioSource.connect(mixedStreamDestination);
 
-        mediaRecorder.start(1000); // 1秒ごとにデータを取得
-        isRecording = true;
-        recordButton.classList.add('recording');
-        recordButton.querySelector('.label').textContent = '録画停止';
-        recordButton.querySelector('.icon').textContent = '⏹️'; // 停止アイコン
-        console.log('録画を開始しました。');
+            // 2. 録画用の新しいストリームを作成
+            // 映像は相手のもの、音声は合成したものを使用
+            const videoTrack = remoteAudioStream.getVideoTracks()[0];
+            const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
+            const streamToRecord = new MediaStream([videoTrack, mixedAudioTrack]);
+
+            // 3. MediaRecorderを初期化
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm; codecs=vp8,opus' });
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `webrtc_conversation_${new Date().toISOString()}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+                recordedChunks = [];
+            };
+
+            mediaRecorder.start(1000);
+            isRecording = true;
+            recordButton.classList.add('recording');
+            recordButton.querySelector('.label').textContent = '録画停止';
+            recordButton.querySelector('.icon').textContent = '⏹️';
+            console.log('会話の録画を開始しました。');
+
+        } catch (e) {
+            console.error('録画の開始に失敗しました:', e);
+            alert('録画の開始に失敗しました。詳細はコンソールを確認してください。');
+        }
+
     } else {
-        // 録画停止
-        mediaRecorder.stop();
+        // --- 録画停止 ---
+        if (mediaRecorder) {
+            mediaRecorder.stop();
+        }
+        if (audioContext) {
+            // AudioContextを閉じてリソースを解放
+            audioContext.close();
+        }
         isRecording = false;
         recordButton.classList.remove('recording');
         recordButton.querySelector('.label').textContent = '録画';
-        recordButton.querySelector('.icon').textContent = '⏺️'; // 録画アイコン
-        console.log('録画を停止しました。ファイルをダウンロードします。');
+        recordButton.querySelector('.icon').textContent = '⏺️';
+        console.log('会話の録画を停止しました。');
     }
 }

@@ -86,7 +86,7 @@ function connectWebSocket() {
                 console.log('Received ready signal. Initiating call.');
                 call();
             } else if (message.offer) {
-                if (!pc) createPeerConnection(); // 念のため
+                if (!pc) createPeerConnection();
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
                 remoteCandidatesQueue = [];
@@ -96,11 +96,14 @@ function connectWebSocket() {
                 isCallInProgress = true;
                 updateCallButton(true);
             } else if (message.answer) {
-                if (!pc.currentRemoteDescription) { // Answerを二重に設定しない
+                // ▼▼▼ 変更: 状態が正しい時のみAnswerを設定する「門番」を追加 ▼▼▼
+                if (pc.signalingState === 'have-local-offer') {
                     await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                    for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+                    remoteCandidatesQueue = [];
+                } else {
+                    console.warn('Received an answer in an unexpected state:', pc.signalingState);
                 }
-                for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-                remoteCandidatesQueue = [];
             } else if (message.candidate) {
                 if (pc && pc.remoteDescription) {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
@@ -125,33 +128,21 @@ function connectWebSocket() {
     };
 }
 
-// ▼▼▼ 変更: 処理の順序を厳格化 ▼▼▼
 function createPeerConnection() {
     if (pc) {
         pc.close();
     }
     pc = new RTCPeerConnection(servers);
-
-    // 1. 【最優先】まず自分のメディアトラックを接続に追加する
+    
     if (localStream) {
-        localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-            console.log('Local track added.');
-        });
-    } else {
-        console.error('Local stream is not available to add tracks.');
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
-    // 2. 次に、各種イベントハンドラを設定する
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state change: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             isCallInProgress = true;
             updateCallButton(true);
-        }
-        if (pc.iceConnectionState === 'failed') {
-            // 接続失敗時の再試行ロジックなどをここに入れることもできる
-            console.error('ICE connection failed.');
         }
     };
 
@@ -161,12 +152,10 @@ function createPeerConnection() {
         }
     };
 
-    // 3. 最後に、相手のトラックを受け取るためのハンドラを設定する
     pc.ontrack = event => {
-        console.log('Remote track received.'); // このログが出れば成功！
+        console.log('Remote track received.');
         if (remoteVideo.srcObject !== event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
-            console.log('Remote stream is now being displayed.');
         }
     };
 }
@@ -194,7 +183,7 @@ function resetCallState() {
     }
     remoteVideo.srcObject = null;
     updateCallButton(false);
-    createPeerConnection(); // 次の通話に備える
+    createPeerConnection();
 }
 
 function updateCallButton(isInProgress) {

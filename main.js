@@ -27,7 +27,7 @@ function sendMessage(message) {
 }
 
 createRoomButton.addEventListener('click', createNewRoom);
-callButton.addEventListener('click', handleCallButtonClick); // ← この関数の内容を修正します
+callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
 
@@ -58,12 +58,11 @@ async function startCall() {
 }
 
 let isCallInProgress = false;
-// ▼▼▼ 変更: 手動での通話開始機能を復活させる ▼▼▼
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
     } else {
-        call(); // この行を復活させます
+        call();
     }
 }
 
@@ -86,36 +85,32 @@ function connectWebSocket() {
             const message = JSON.parse(event.data);
             
             if (message.type === 'ready' && !isCallInProgress) {
-                console.log('Received ready signal. Initiating call.');
                 call();
             } else if (message.offer) {
-                if (isNegotiating) return;
-                if (!pc) createPeerConnection();
+                if (isNegotiating || pc.signalingState !== 'stable') return;
                 isNegotiating = true;
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 sendMessage({ answer: pc.localDescription });
                 isNegotiating = false;
-                isCallInProgress = true;
-                updateCallButton(true);
             } else if (message.answer) {
-                await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                if (pc.signalingState === 'have-local-offer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                }
             } else if (message.candidate) {
-                if (pc && pc.remoteDescription) {
+                if (pc.remoteDescription) {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
                 }
             } else if (message.type === 'count') {
                 participantInfo.textContent = `参加人数: ${message.count}人`;
             } else if (message.type === 'hangup') {
-                console.log('Peer has hung up.');
                 resetCallState();
             }
         } catch (e) { console.error('Error handling message:', e); }
     };
     
     socket.onclose = () => {
-        console.log('WebSocket disconnected.');
         resetCallState();
         callButton.disabled = true;
         micButton.disabled = true;
@@ -128,7 +123,6 @@ function createPeerConnection() {
     pc = new RTCPeerConnection(servers);
     
     pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state change: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             isCallInProgress = true;
             updateCallButton(true);
@@ -139,12 +133,15 @@ function createPeerConnection() {
         if (event.candidate) sendMessage({ candidate: event.candidate });
     };
 
+    // ▼▼▼ 変更: ontackのロジックを修正 ▼▼▼
     pc.ontrack = event => {
-        console.log('Remote track received.');
-        if (remoteVideo.srcObject !== event.streams[0]) {
-            remoteVideo.srcObject = event.streams[0];
-            remoteVideo.play().catch(e => console.error("Autoplay failed", e));
+        // すでにストリームが設定されている場合は、何もしない
+        if (remoteVideo.srcObject) {
+            return;
         }
+        console.log('First remote track received. Setting stream.');
+        remoteVideo.srcObject = event.streams[0];
+        // autoplay属性に再生を任せる
     };
     
     if (localStream) {
@@ -156,12 +153,9 @@ async function call() {
     if (!pc || isNegotiating) return;
     try {
         isNegotiating = true;
-        console.log("Creating offer...");
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendMessage({ offer: pc.localDescription });
-        isCallInProgress = true;
-        updateCallButton(true);
     } catch(e) {
       console.error("Failed to create offer:", e);
     } finally {
@@ -194,7 +188,7 @@ function updateCallButton(isInProgress) {
         label.textContent = '通話終了';
     } else {
         callButton.classList.remove('hangup');
-        label.textContent = '通話開始'; // ラベルを元に戻す
+        label.textContent = '通話開始';
     }
 }
 

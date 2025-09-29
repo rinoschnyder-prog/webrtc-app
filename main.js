@@ -11,7 +11,8 @@ const controls = document.getElementById('controls');
 const participantInfo = document.getElementById('participant-info');
 
 let localStream, pc, socket;
-let remoteCandidatesQueue = [];
+let isNegotiating = false; // ▼▼▼ 追加: 交渉中の状態を管理するフラグ ▼▼▼
+
 const servers = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:1932' },
@@ -60,8 +61,6 @@ let isCallInProgress = false;
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
-    } else {
-        call();
     }
 }
 
@@ -82,30 +81,31 @@ function connectWebSocket() {
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
-            if (message.type === 'ready') {
+            
+            if (message.type === 'ready' && !isCallInProgress) {
                 console.log('Received ready signal. Initiating call.');
                 call();
             } else if (message.offer) {
+                // ▼▼▼ 変更: 交渉中の場合は相手のOfferを無視（グレア対策） ▼▼▼
+                if (isNegotiating) {
+                    console.log("Ignoring offer during negotiation.");
+                    return;
+                }
                 if (!pc) createPeerConnection();
+                isNegotiating = true;
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
-                for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-                remoteCandidatesQueue = [];
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 sendMessage({ answer: pc.localDescription });
+                isNegotiating = false;
                 isCallInProgress = true;
                 updateCallButton(true);
             } else if (message.answer) {
-                if (pc.signalingState === 'have-local-offer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
-                    for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-                    remoteCandidatesQueue = [];
-                }
+                await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
             } else if (message.candidate) {
+                // ICE候補はキューイングせずに直接追加を試みる
                 if (pc && pc.remoteDescription) {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
-                } else {
-                    remoteCandidatesQueue.push(message.candidate);
                 }
             } else if (message.type === 'count') {
                 participantInfo.textContent = `参加人数: ${message.count}人`;
@@ -126,15 +126,9 @@ function connectWebSocket() {
 }
 
 function createPeerConnection() {
-    if (pc) {
-        pc.close();
-    }
+    if (pc) pc.close();
     pc = new RTCPeerConnection(servers);
     
-    if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state change: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
@@ -144,35 +138,37 @@ function createPeerConnection() {
     };
 
     pc.onicecandidate = event => {
-        if (event.candidate) {
-            sendMessage({ candidate: event.candidate });
-        }
+        if (event.candidate) sendMessage({ candidate: event.candidate });
     };
 
-    // ▼▼▼ 変更: ここが最後の修正です ▼▼▼
     pc.ontrack = event => {
         console.log('Remote track received.');
         if (remoteVideo.srcObject !== event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
-            
-            // 再生を強制的に開始する
-            remoteVideo.play().catch(error => {
-                console.error('Remote video play failed:', error);
-                // ここでエラーが出た場合、ユーザーに再生ボタンを押してもらうなどのUIが必要
-                alert('相手のビデオの自動再生に失敗しました。画面をクリックすると再生される可能性があります。');
-            });
+            remoteVideo.play().catch(e => console.error("Autoplay failed", e));
         }
     };
+    
+    if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
 }
 
 async function call() {
-    if (!pc) return;
-    console.log("Creating offer...");
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    sendMessage({ offer: pc.localDescription });
-    isCallInProgress = true;
-    updateCallButton(true);
+    if (!pc || isNegotiating) return;
+    try {
+        isNegotiating = true;
+        console.log("Creating offer...");
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        sendMessage({ offer: pc.localDescription });
+        isCallInProgress = true;
+        updateCallButton(true);
+    } catch(e) {
+      console.error("Failed to create offer:", e);
+    } finally {
+        isNegotiating = false;
+    }
 }
 
 function hangup() {
@@ -182,6 +178,7 @@ function hangup() {
 
 function resetCallState() {
     isCallInProgress = false;
+    isNegotiating = false;
     if (pc) {
         pc.close();
         pc = null;
@@ -196,12 +193,10 @@ function updateCallButton(isInProgress) {
     const label = callButton.querySelector('.label');
     if (isInProgress) {
         callButton.classList.add('hangup');
-        icon.style.transform = 'scaleX(-1) rotate(135deg)';
         label.textContent = '通話終了';
     } else {
         callButton.classList.remove('hangup');
-        icon.style.transform = 'none';
-        label.textContent = '通話開始';
+        label.textContent = '待機中'; // ラベルをより分かりやすく
     }
 }
 

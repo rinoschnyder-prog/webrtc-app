@@ -10,7 +10,8 @@ const port = process.env.PORT || 3000;
 app.use(express.static(__dirname));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// ▼▼▼ 変更点1: clientTrackingを有効にする ▼▼▼
+const wss = new WebSocketServer({ server, clientTracking: true });
 
 const rooms = {};
 
@@ -39,37 +40,37 @@ wss.on('connection', (ws, req) => {
         return;
     }
 
-    // ▼▼▼ 変更点: 新しいクライアントを追加する前に、ルームの人数をチェック ▼▼▼
     const clientsInRoom = getClientsInRoom(room);
     if (clientsInRoom.length >= 2) {
         console.log(`ルーム[${room}]への参加が拒否されました（満室）`);
-        // 満室であることをクライアントに通知
         ws.send(JSON.stringify({ type: 'room-full' }));
-        // 接続を閉じる
         ws.close();
-        return; // この後の処理は行わない
+        return;
     }
 
-    // ルームが満室でなければ、クライアントをルームに追加
     if (!rooms[room]) {
         rooms[room] = [];
     }
     rooms[room].push(ws);
     ws.room = room;
 
+    // ▼▼▼ 変更点2: 接続時に生存フラグを立て、pongイベントのリスナーを設定 ▼▼▼
+    ws.isAlive = true;
+    ws.on('pong', () => {
+        ws.isAlive = true;
+    });
+
     console.log(`クライアントがルームに参加しました: ${room}`);
 
-    // このクライアント以外の、同じルームにいるクライアントを取得
     const otherClients = clientsInRoom.filter(client => client.readyState === 1);
 
-    if (otherClients.length > 0) { // 自分が2人目の場合
+    if (otherClients.length > 0) {
         ws.send(JSON.stringify({ type: 'create-offer' }));
         otherClients.forEach(client => {
             client.send(JSON.stringify({ type: 'peer-joined' }));
         });
     }
 
-    // 参加人数の更新は、新しいクライアントを追加した後に全員に通知
     broadcastParticipantCount(room);
 
     ws.on('message', message => {
@@ -99,9 +100,26 @@ wss.on('connection', (ws, req) => {
             }
         }
         
-        // 退出後、残っている人に人数を通知
         broadcastParticipantCount(room);
     });
+});
+
+// ▼▼▼ 変更点3: ハートビート（生存確認）の仕組みを追加 ▼▼▼
+const interval = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) {
+        console.log(`クライアント[${ws.room}]へのPing応答がなかったため、接続を強制終了します。`);
+        return ws.terminate(); // 応答がなければ強制終了
+    }
+
+    ws.isAlive = false; // 次の確認のために一旦フラグを倒す
+    ws.ping(); // 生存確認のPingを送信
+  });
+}, 30000); // 30秒ごとに実行
+
+// サーバーが閉じる際にインターバルもクリアする
+wss.on('close', () => {
+  clearInterval(interval);
 });
 
 server.listen(port, () => {

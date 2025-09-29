@@ -16,14 +16,16 @@ let isCallInProgress = false;
 
 const servers = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:1932' },
+        { urls: 'stun:stun.l.google.com:19302' }, // ポートを19302に変更 (より一般的)
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
     ]
 };
 
+// --- 初期化処理 ---
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
+        console.log('Sent message:', message); // 送信ログ
     }
 }
 
@@ -36,12 +38,16 @@ function createNewRoom() {
     const newRoomId = uuid.v4();
     window.location.href = `/?room=${newRoomId}`;
 }
+
 window.addEventListener('load', () => {
     const room = new URL(window.location.href).searchParams.get('room');
-    if (room) startCall();
+    if (room) {
+        startCallPreparation();
+    }
 });
 
-async function startCall() {
+// --- メインロジック ---
+async function startCallPreparation() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         localVideo.srcObject = stream;
@@ -54,7 +60,7 @@ async function startCall() {
         toggleVideo(true);
         connectWebSocket();
     } catch (e) {
-        alert(`カメラの起動に失敗しました: ${e.name}`);
+        alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
     }
 }
 
@@ -62,34 +68,38 @@ function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
     } else {
-        call(); // 手動での発信機能を維持
+        // 手動での発信はサーバーからの指示で行うため、このボタンからは基本的に切断のみ
+        console.warn("Manual call initiation is disabled. Call starts automatically.");
     }
 }
 
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsProtocol = 'wss:'; // Render.comはwssを強制するため
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
         console.log('WebSocket connected.');
         createPeerConnection();
-        callButton.disabled = false;
-        micButton.disabled = false;
-        videoButton.disabled = false;
+        // ボタンは接続が確立してから有効化する
     };
 
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
-            
-            if (message.type === 'ready') {
-                // ▼▼▼ 変更: isCallInProgressチェックを削除し、確実にcallを呼び出す ▼▼▼
-                console.log('Received ready signal. Initiating call.');
+            console.log('Received message:', message); // 受信ログ
+
+            // ▼▼▼ 変更点: サーバーからの指示に基づいて動作 ▼▼▼
+            if (message.type === 'create-offer') {
+                console.log('Received create-offer signal. Initiating call.');
                 call();
+            } else if (message.type === 'peer-joined') {
+                console.log('Peer joined, waiting for offer.');
+                // 相手からのOfferを待つ
             } else if (message.offer) {
                 if (isNegotiating || pc.signalingState !== 'stable') return;
+                console.log('Received offer.');
                 isNegotiating = true;
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 const answer = await pc.createAnswer();
@@ -98,11 +108,16 @@ function connectWebSocket() {
                 isNegotiating = false;
             } else if (message.answer) {
                 if (pc.signalingState === 'have-local-offer') {
+                    console.log('Received answer.');
                     await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
                 }
             } else if (message.candidate) {
-                if (pc.remoteDescription) {
+                console.log('Received ICE candidate.');
+                // リモートdescriptionが設定される前にcandidateが届くことがあるため、キューイングはしないが、エラーは握りつぶす
+                try {
                     await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+                } catch (e) {
+                    if (pc.remoteDescription) console.error('Error adding received ice candidate', e);
                 }
             } else if (message.type === 'count') {
                 participantInfo.textContent = `参加人数: ${message.count}人`;
@@ -113,6 +128,7 @@ function connectWebSocket() {
     };
     
     socket.onclose = () => {
+        console.log('WebSocket disconnected.');
         resetCallState();
         callButton.disabled = true;
         micButton.disabled = true;
@@ -125,20 +141,41 @@ function createPeerConnection() {
     pc = new RTCPeerConnection(servers);
     
     pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state change: ${pc.iceConnectionState}`);
-        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-            isCallInProgress = true;
-            updateCallButton(true);
+        console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
+        switch(pc.iceConnectionState) {
+            case 'connected':
+            case 'completed':
+                isCallInProgress = true;
+                updateCallButton(true);
+                // ボタンを有効化
+                callButton.disabled = false;
+                micButton.disabled = false;
+                videoButton.disabled = false;
+                break;
+            case 'disconnected':
+            case 'failed':
+            case 'closed':
+                if (isCallInProgress) {
+                    resetCallState();
+                }
+                break;
         }
     };
 
     pc.onicecandidate = event => {
-        if (event.candidate) sendMessage({ candidate: event.candidate });
+        if (event.candidate) {
+            sendMessage({ candidate: event.candidate });
+        } else {
+            console.log('All ICE candidates have been sent.');
+        }
     };
 
     pc.ontrack = event => {
-        if (remoteVideo.srcObject) return;
-        remoteVideo.srcObject = event.streams[0];
+        console.log('Remote track received.');
+        if (remoteVideo.srcObject !== event.streams[0]) {
+            remoteVideo.srcObject = event.streams[0];
+            remoteVideo.play().catch(e => console.error('Remote video play failed:', e));
+        }
     };
     
     if (localStream) {
@@ -147,7 +184,10 @@ function createPeerConnection() {
 }
 
 async function call() {
-    if (!pc || isNegotiating || isCallInProgress) return; // 既に通話中なら何もしない
+    if (!pc || isNegotiating || isCallInProgress) {
+        console.warn("Call aborted. PC not ready, negotiating, or call already in progress.");
+        return;
+    }
     try {
         isNegotiating = true;
         console.log("Creating offer...");
@@ -167,6 +207,7 @@ function hangup() {
 }
 
 function resetCallState() {
+    console.log("Resetting call state.");
     isCallInProgress = false;
     isNegotiating = false;
     if (pc) {
@@ -175,11 +216,14 @@ function resetCallState() {
     }
     remoteVideo.srcObject = null;
     updateCallButton(false);
-    createPeerConnection();
+    
+    // ピア接続を再作成して次の接続に備える
+    if (localStream) {
+        createPeerConnection();
+    }
 }
 
 function updateCallButton(isInProgress) {
-    const icon = callButton.querySelector('.icon');
     const label = callButton.querySelector('.label');
     if (isInProgress) {
         callButton.classList.add('hangup');

@@ -18,8 +18,11 @@ const canvasContext = recordingCanvas.getContext('2d');
 let localStream, pc, socket;
 let isNegotiating = false;
 let isCallInProgress = false;
-let isRemoteVideoReady = false; // ▼▼▼ 変更点: 相手ビデオの準備完了フラグを追加 ▼▼▼
+let isRemoteVideoReady = false;
 let animationFrameId;
+
+// ▼▼▼ 変更点: Apple製モバイル端末かどうかを判定するフラグを追加 ▼▼▼
+const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
 // 録画関連の変数
 let mediaRecorder;
@@ -41,13 +44,39 @@ micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
 recordButton.addEventListener('click', () => toggleRecording());
 
+async function startCallPreparation() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        localVideo.srcObject = stream;
+        localStream = stream;
+        initialView.style.display = 'none';
+        remoteVideo.style.display = 'block';
+        controls.style.display = 'flex';
+        participantInfo.style.display = 'block';
+        micButton.disabled = false;
+        videoButton.disabled = false;
+        
+        // ▼▼▼ 変更点: Apple製端末では録画ボタンを非表示にする ▼▼▼
+        if (isAppleDevice) {
+            recordButton.style.display = 'none';
+        }
 
-// ▼▼▼ 変更点: 録画ボタンを有効化するための専用関数を追加 ▼▼▼
+        toggleMic(true);
+        toggleVideo(true);
+        connectWebSocket();
+    } catch (e) {
+        alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
+    }
+}
+
+
 function checkAndEnableRecording() {
-    // 通話が確立しており、かつ相手のビデオメタデータが読み込み済みの場合のみ有効化
     if (isCallInProgress && isRemoteVideoReady) {
-        recordButton.disabled = false;
-        console.log('Recording is now possible.');
+        // ▼▼▼ 変更点: Apple製端末でない場合のみボタンを有効化 ▼▼▼
+        if (!isAppleDevice) {
+            recordButton.disabled = false;
+            console.log('Recording is now possible.');
+        }
     }
 }
 
@@ -63,7 +92,7 @@ function createPeerConnection() {
                 isCallInProgress = true;
                 updateCallButton(true);
                 callButton.disabled = false;
-                checkAndEnableRecording(); // ▼▼▼ 変更点: 専用関数を呼び出す ▼▼▼
+                checkAndEnableRecording();
                 break;
             case 'disconnected':
             case 'failed':
@@ -83,16 +112,13 @@ function createPeerConnection() {
         if (remoteVideo.srcObject !== event.streams[0]) {
             const remoteStream = event.streams[0];
             remoteVideo.srcObject = remoteStream;
-
-            // ▼▼▼ 変更点: 相手ビデオの準備状態をリセットし、イベントリスナーを設定 ▼▼▼
             isRemoteVideoReady = false;
-            recordButton.disabled = true; // 新しいトラックが来たら一旦無効化
+            recordButton.disabled = true;
 
-            // 相手ビデオのメタデータが読み込まれたら発火
             remoteVideo.onloadedmetadata = () => {
                 console.log('Remote video metadata loaded.');
                 isRemoteVideoReady = true;
-                checkAndEnableRecording(); // 専用関数を呼び出す
+                checkAndEnableRecording();
             };
 
             remoteVideo.play().catch(e => console.error('Remote video play failed:', e));
@@ -108,7 +134,7 @@ function resetCallState() {
     console.log("Resetting call state.");
     isCallInProgress = false;
     isNegotiating = false;
-    isRemoteVideoReady = false; // ▼▼▼ 変更点: リセット処理を追加 ▼▼▼
+    isRemoteVideoReady = false;
     
     if (pc) {
         pc.close();
@@ -130,7 +156,6 @@ function resetCallState() {
     }
 }
 
-// --- toggleRecording, drawVideosOnCanvas, およびその他の関数 (これらは前回のコードから変更なし) ---
 function drawVideosOnCanvas() {
     if (!isRecording) return;
     recordingCanvas.width = remoteVideo.videoWidth;
@@ -147,8 +172,9 @@ function drawVideosOnCanvas() {
 
 function toggleRecording() {
     if (!isRecording) {
-        if (!isCallInProgress || !isRemoteVideoReady) {
-            alert('相手との通話が開始され、映像が完全に表示されてから録画を開始してください。');
+        // ▼▼▼ 変更点: 映像サイズのチェックをより厳密化 ▼▼▼
+        if (!isCallInProgress || !isRemoteVideoReady || remoteVideo.videoWidth === 0) {
+            alert('相手の映像が完全に表示されてから、もう一度お試しください。');
             return;
         }
 
@@ -222,6 +248,7 @@ function toggleRecording() {
     }
 }
 
+
 // (以下、変更のない関数が続きます)
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -239,24 +266,6 @@ window.addEventListener('load', () => {
         startCallPreparation();
     }
 });
-async function startCallPreparation() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-        localVideo.srcObject = stream;
-        localStream = stream;
-        initialView.style.display = 'none';
-        remoteVideo.style.display = 'block';
-        controls.style.display = 'flex';
-        participantInfo.style.display = 'block';
-        micButton.disabled = false;
-        videoButton.disabled = false;
-        toggleMic(true);
-        toggleVideo(true);
-        connectWebSocket();
-    } catch (e) {
-        alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
-    }
-}
 function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();

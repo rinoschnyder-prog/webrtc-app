@@ -17,7 +17,8 @@ const settingsButton = document.getElementById('settingsButton');
 const settingsPanel = document.getElementById('settingsPanel');
 const frameRateSelect = document.getElementById('frameRateSelect');
 const audioQualitySelect = document.getElementById('audioQualitySelect');
-
+const loadingOverlay = document.getElementById('loading-overlay');
+const loadingText = document.getElementById('loading-text');
 
 // --- グローバル変数 ---
 let localStream, pc, socket;
@@ -52,7 +53,8 @@ settingsButton.addEventListener('click', () => {
 
 async function startCallPreparation() {
     try {
-        // ユーザーが選択したフレームレートを読み取って適用
+        loadingOverlay.style.display = 'flex';
+
         const selectedFrameRate = parseInt(frameRateSelect.value, 10);
         const constraints = {
             audio: true,
@@ -70,7 +72,7 @@ async function startCallPreparation() {
         participantInfo.style.display = 'block';
         micButton.disabled = false;
         videoButton.disabled = false;
-        settingsButton.disabled = false; // 設定ボタンを有効化
+        settingsButton.disabled = false;
         
         if (isAppleDevice) {
             recordButton.style.display = 'none';
@@ -81,7 +83,84 @@ async function startCallPreparation() {
         connectWebSocket();
     } catch (e) {
         alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
+        loadingOverlay.style.display = 'none';
     }
+}
+
+function connectWebSocket() {
+    const room = new URL(window.location.href).searchParams.get('room');
+    const wsProtocol = 'wss:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
+    socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+        console.log('WebSocket connected.');
+        loadingOverlay.style.display = 'none';
+        createPeerConnection();
+    };
+
+    socket.onmessage = async (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            console.log('Received message:', message);
+            if (message.type === 'room-full') {
+                alert('この通話ルームは満室です（最大2名）。\nトップページに戻ります。');
+                window.location.href = '/';
+                return;
+            }
+            if (message.type === 'create-offer') {
+                call();
+            } else if (message.type === 'peer-joined') {
+                console.log('Peer joined, waiting for offer.');
+                callButton.disabled = false;
+            } else if (message.offer) {
+                if (isNegotiating || pc.signalingState !== 'stable') return;
+                isNegotiating = true;
+                await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                sendMessage({ answer: pc.localDescription });
+                isNegotiating = false;
+            } else if (message.answer) {
+                if (pc.signalingState === 'have-local-offer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                }
+            } else if (message.candidate) {
+                try {
+                    await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+                } catch (e) {
+                    if (pc.remoteDescription) console.error('Error adding received ice candidate', e);
+                }
+            } else if (message.type === 'count') {
+                const count = message.count;
+                participantInfo.textContent = `参加人数: ${count}人`;
+                if (!isCallInProgress) {
+                    callButton.disabled = (count <= 1);
+                }
+            } else if (message.type === 'hangup') {
+                resetCallState();
+            }
+        } catch (e) {
+            console.error('Error handling message:', e);
+        }
+    };
+    
+    socket.onclose = () => {
+        console.log('WebSocket disconnected.');
+        if (loadingOverlay.style.display !== 'none') {
+            loadingText.textContent = 'サーバーへの接続に失敗しました';
+            alert('サーバーに接続できませんでした。ページを再読み込みするか、後でもう一度お試しください。');
+        }
+        resetCallState();
+        callButton.disabled = true;
+        micButton.disabled = true;
+        videoButton.disabled = true;
+        recordButton.disabled = true;
+        settingsButton.disabled = true;
+        if (isRecording) {
+            toggleRecording();
+        }
+    };
 }
 
 function checkAndEnableRecording() {
@@ -165,7 +244,6 @@ function toggleRecording() {
 
             const streamToRecord = new MediaStream([canvasVideoTrack, mixedAudioTrack]);
             
-            // ユーザーが選択した音質を読み取って適用
             const selectedAudioBitrate = parseInt(audioQualitySelect.value, 10);
             const recorderOptions = {
                 mimeType: 'video/webm; codecs=vp8,opus',
@@ -199,7 +277,7 @@ function toggleRecording() {
 
             mediaRecorder.start(1000);
             isRecording = true;
-            settingsPanel.style.display = 'none'; // 録画開始時に設定パネルを閉じる
+            settingsPanel.style.display = 'none';
             recordButton.classList.add('recording');
             recordButton.querySelector('.label').textContent = '録画停止';
             recordButton.querySelector('.icon').textContent = '⏹️';
@@ -236,31 +314,123 @@ function drawVideosOnCanvas() {
     animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
 }
 
-
-// (以下、変更のない関数が続きます)
-function sendMessage(message) { if (socket && socket.readyState === WebSocket.OPEN) { socket.send(JSON.stringify(message)); console.log('Sent message:', message); } }
-function createNewRoom() { const newRoomId = uuid.v4(); window.location.href = `/?room=${newRoomId}`; }
-window.addEventListener('load', () => { const room = new URL(window.location.href).searchParams.get('room'); if (room) { startCallPreparation(); } });
-function handleCallButtonClick() { if (isCallInProgress) { hangup(); } else { console.log('Requesting to start a new call...'); sendMessage({ type: 'request-to-call' }); } }
-function connectWebSocket() {
-    const room = new URL(window.location.href).searchParams.get('room');
-    const wsProtocol = 'wss:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
-    socket = new WebSocket(wsUrl);
-    socket.onopen = () => { console.log('WebSocket connected.'); createPeerConnection(); };
-    socket.onmessage = async (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            console.log('Received message:', message);
-            if (message.type === 'room-full') { alert('この通話ルームは満室です（最大2名）。\nトップページに戻ります。'); window.location.href = '/'; return; }
-            if (message.type === 'create-offer') { call(); } else if (message.type === 'peer-joined') { console.log('Peer joined, waiting for offer.'); callButton.disabled = false; } else if (message.offer) { if (isNegotiating || pc.signalingState !== 'stable') return; isNegotiating = true; await pc.setRemoteDescription(new RTCSessionDescription(message.offer)); const answer = await pc.createAnswer(); await pc.setLocalDescription(answer); sendMessage({ answer: pc.localDescription }); isNegotiating = false; } else if (message.answer) { if (pc.signalingState === 'have-local-offer') { await pc.setRemoteDescription(new RTCSessionDescription(message.answer)); } } else if (message.candidate) { try { await pc.addIceCandidate(new RTCIceCandidate(message.candidate)); } catch (e) { if (pc.remoteDescription) console.error('Error adding received ice candidate', e); } } else if (message.type === 'count') { const count = message.count; participantInfo.textContent = `参加人数: ${count}人`; if (!isCallInProgress) { callButton.disabled = (count <= 1); } } else if (message.type === 'hangup') { resetCallState(); }
-        } catch (e) { console.error('Error handling message:', e); }
-    };
-    socket.onclose = () => { console.log('WebSocket disconnected.'); resetCallState(); callButton.disabled = true; micButton.disabled = true; videoButton.disabled = true; recordButton.disabled = true; settingsButton.disabled = true; if (isRecording) { toggleRecording(); } };
+function sendMessage(message) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+        console.log('Sent message:', message);
+    }
 }
-async function call() { if (!pc || isNegotiating || isCallInProgress) return; try { isNegotiating = true; const offer = await pc.createOffer(); await pc.setLocalDescription(offer); sendMessage({ offer: pc.localDescription }); } catch(e) { console.error("Failed to create offer:", e); } finally { isNegotiating = false; } }
-function hangup() { sendMessage({ type: 'hangup' }); resetCallState(); }
-function resetCallState() { console.log("Resetting call state."); isCallInProgress = false; isNegotiating = false; isRemoteVideoReady = false; if (pc) { pc.close(); pc = null; } remoteVideo.srcObject = null; updateCallButton(false); const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10); callButton.disabled = (participantCount <= 1); recordButton.disabled = true; if (isRecording) { toggleRecording(); } if (localStream) { createPeerConnection(); } }
-function updateCallButton(isInProgress) { const label = callButton.querySelector('.label'); const icon = callButton.querySelector('.icon'); if (isInProgress) { callButton.classList.add('hangup'); icon.textContent = '📞'; label.textContent = '通話終了'; } else { callButton.classList.remove('hangup'); icon.textContent = '📞'; label.textContent = '通話開始'; } }
-function toggleMic(isInitial = false) { if (!localStream) return; const audioTrack = localStream.getAudioTracks()[0]; const icon = micButton.querySelector('.icon'); const label = micButton.querySelector('.label'); if (audioTrack) { if (!isInitial) audioTrack.enabled = !audioTrack.enabled; if (audioTrack.enabled) { icon.textContent = '🎤'; label.textContent = 'ミュート'; micButton.style.backgroundColor = '#3c4043'; } else { icon.textContent = '🔇'; label.textContent = 'ミュート解除'; micButton.style.backgroundColor = '#ea4335'; } } }
-function toggleVideo(isInitial = false) { if (!localStream) return; const videoTrack = localStream.getVideoTracks()[0]; const icon = videoButton.querySelector('.icon'); const label = videoButton.querySelector('.label'); if (videoTrack) { if (!isInitial) videoTrack.enabled = !videoTrack.enabled; if (videoTrack.enabled) { icon.textContent = '📹'; label.textContent = 'ビデオ停止'; videoButton.style.backgroundColor = '#3c4043'; } else { icon.textContent = '🚫'; label.textContent = 'ビデオ開始'; videoButton.style.backgroundColor = '#ea4335'; } } }
+
+function createNewRoom() {
+    const newRoomId = uuid.v4();
+    window.location.href = `/?room=${newRoomId}`;
+}
+
+window.addEventListener('load', () => {
+    const room = new URL(window.location.href).searchParams.get('room');
+    if (room) {
+        startCallPreparation();
+    }
+});
+
+function handleCallButtonClick() {
+    if (isCallInProgress) {
+        hangup();
+    } else {
+        console.log('Requesting to start a new call...');
+        sendMessage({ type: 'request-to-call' });
+    }
+}
+
+async function call() {
+    if (!pc || isNegotiating || isCallInProgress) return;
+    try {
+        isNegotiating = true;
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        sendMessage({ offer: pc.localDescription });
+    } catch(e) {
+      console.error("Failed to create offer:", e);
+    } finally {
+        isNegotiating = false;
+    }
+}
+
+function hangup() {
+    sendMessage({ type: 'hangup' });
+    resetCallState();
+}
+
+function resetCallState() {
+    console.log("Resetting call state.");
+    isCallInProgress = false;
+    isNegotiating = false;
+    isRemoteVideoReady = false;
+    if (pc) {
+        pc.close();
+        pc = null;
+    }
+    remoteVideo.srcObject = null;
+    updateCallButton(false);
+    const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
+    callButton.disabled = (participantCount <= 1);
+    recordButton.disabled = true;
+    if (isRecording) {
+        toggleRecording();
+    }
+    if (localStream) {
+        createPeerConnection();
+    }
+}
+
+function updateCallButton(isInProgress) {
+    const label = callButton.querySelector('.label');
+    const icon = callButton.querySelector('.icon');
+    if (isInProgress) {
+        callButton.classList.add('hangup');
+        icon.textContent = '📞';
+        label.textContent = '通話終了';
+    } else {
+        callButton.classList.remove('hangup');
+        icon.textContent = '📞';
+        label.textContent = '通話開始';
+    }
+}
+
+function toggleMic(isInitial = false) {
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    const icon = micButton.querySelector('.icon');
+    const label = micButton.querySelector('.label');
+    if (audioTrack) {
+        if (!isInitial) audioTrack.enabled = !audioTrack.enabled;
+        if (audioTrack.enabled) {
+            icon.textContent = '🎤';
+            label.textContent = 'ミュート';
+            micButton.style.backgroundColor = '#3c4043';
+        } else {
+            icon.textContent = '🔇';
+            label.textContent = 'ミュート解除';
+            micButton.style.backgroundColor = '#ea4335';
+        }
+    }
+}
+
+function toggleVideo(isInitial = false) {
+    if (!localStream) return;
+    const videoTrack = localStream.getVideoTracks()[0];
+    const icon = videoButton.querySelector('.icon');
+    const label = videoButton.querySelector('.label');
+    if (videoTrack) {
+        if (!isInitial) videoTrack.enabled = !videoTrack.enabled;
+        if (videoTrack.enabled) {
+            icon.textContent = '📹';
+            label.textContent = 'ビデオ停止';
+            videoButton.style.backgroundColor = '#3c4043';
+        } else {
+            icon.textContent = '🚫';
+            label.textContent = 'ビデオ開始';
+            videoButton.style.backgroundColor = '#ea4335';
+        }
+    }
+}

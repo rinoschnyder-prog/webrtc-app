@@ -68,7 +68,6 @@ function handleCallButtonClick() {
     if (isCallInProgress) {
         hangup();
     } else {
-        // ▼▼▼ 変更点: 通話中でない場合、再接続要求を送信 ▼▼▼
         console.log('Requesting to start a new call...');
         sendMessage({ type: 'request-to-call' });
     }
@@ -90,11 +89,18 @@ function connectWebSocket() {
             const message = JSON.parse(event.data);
             console.log('Received message:', message);
 
+            // ▼▼▼ 変更点: 満室通知を受け取った際の処理を追加 ▼▼▼
+            if (message.type === 'room-full') {
+                alert('この通話ルームは満室です（最大2名）。\nトップページに戻ります。');
+                // 接続がサーバー側で切られるのを待たずに、すぐにリダイレクト
+                window.location.href = '/';
+                return;
+            }
+
             if (message.type === 'create-offer') {
                 call();
             } else if (message.type === 'peer-joined') {
                 console.log('Peer joined, waiting for offer.');
-                // ▼▼▼ 変更点: 相手が入室したら「通話開始」ボタンを有効化 ▼▼▼
                 callButton.disabled = false;
             } else if (message.offer) {
                 if (isNegotiating || pc.signalingState !== 'stable') return;
@@ -117,7 +123,6 @@ function connectWebSocket() {
             } else if (message.type === 'count') {
                 const count = message.count;
                 participantInfo.textContent = `参加人数: ${count}人`;
-                // ▼▼▼ 変更点: 参加人数に応じて「通話開始」ボタンの 상태を制御 ▼▼▼
                 if (!isCallInProgress) {
                     callButton.disabled = (count <= 1);
                 }
@@ -142,7 +147,7 @@ function createPeerConnection() {
     
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
-        switch(pc.iceConnectionState) {
+        switch(pc.iceConnectionstate) {
             case 'connected':
             case 'completed':
                 isCallInProgress = true;
@@ -205,7 +210,6 @@ function resetCallState() {
     remoteVideo.srcObject = null;
     updateCallButton(false);
     
-    // ▼▼▼ 変更点: 通話終了後、参加者が2人いれば再度通話できるようにボタンを有効化 ▼▼▼
     const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
     callButton.disabled = (participantCount <= 1);
     
@@ -219,7 +223,7 @@ function updateCallButton(isInProgress) {
     const icon = callButton.querySelector('.icon');
     if (isInProgress) {
         callButton.classList.add('hangup');
-        icon.textContent = '📞'; // アイコンを元に戻す（スタイルで色が変わる）
+        icon.textContent = '📞';
         label.textContent = '通話終了';
     } else {
         callButton.classList.remove('hangup');

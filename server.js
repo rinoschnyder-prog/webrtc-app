@@ -24,7 +24,7 @@ function broadcastParticipantCount(room) {
     const message = JSON.stringify({ type: 'count', count });
     
     clients.forEach(client => {
-        if (client.readyState === 1) {
+        if (client.readyState === 1) { // WebSocket.OPEN
             client.send(message);
         }
     });
@@ -39,6 +39,18 @@ wss.on('connection', (ws, req) => {
         return;
     }
 
+    // ▼▼▼ 変更点: 新しいクライアントを追加する前に、ルームの人数をチェック ▼▼▼
+    const clientsInRoom = getClientsInRoom(room);
+    if (clientsInRoom.length >= 2) {
+        console.log(`ルーム[${room}]への参加が拒否されました（満室）`);
+        // 満室であることをクライアントに通知
+        ws.send(JSON.stringify({ type: 'room-full' }));
+        // 接続を閉じる
+        ws.close();
+        return; // この後の処理は行わない
+    }
+
+    // ルームが満室でなければ、クライアントをルームに追加
     if (!rooms[room]) {
         rooms[room] = [];
     }
@@ -47,30 +59,29 @@ wss.on('connection', (ws, req) => {
 
     console.log(`クライアントがルームに参加しました: ${room}`);
 
-    const otherClients = getClientsInRoom(room).filter(client => client !== ws && client.readyState === 1);
+    // このクライアント以外の、同じルームにいるクライアントを取得
+    const otherClients = clientsInRoom.filter(client => client.readyState === 1);
 
-    if (otherClients.length > 0) {
+    if (otherClients.length > 0) { // 自分が2人目の場合
         ws.send(JSON.stringify({ type: 'create-offer' }));
         otherClients.forEach(client => {
             client.send(JSON.stringify({ type: 'peer-joined' }));
         });
     }
 
+    // 参加人数の更新は、新しいクライアントを追加した後に全員に通知
     broadcastParticipantCount(room);
 
     ws.on('message', message => {
         const messageString = message.toString();
         const parsedMessage = JSON.parse(messageString);
 
-        // ▼▼▼ 変更点: 再接続要求を処理するロジックを追加 ▼▼▼
         if (parsedMessage.type === 'request-to-call') {
             console.log(`ルーム[${room}]で再接続要求を受信`);
-            // 要求してきた本人にだけ、Offerを作成するよう指示を返す
             ws.send(JSON.stringify({ type: 'create-offer' }));
-            return; // 他のクライアントには転送しない
+            return;
         }
         
-        // 通常のメッセージは送信者以外の全員に転送
         getClientsInRoom(room).forEach(client => {
             if (client !== ws && client.readyState === 1) {
                 client.send(messageString);
@@ -88,6 +99,7 @@ wss.on('connection', (ws, req) => {
             }
         }
         
+        // 退出後、残っている人に人数を通知
         broadcastParticipantCount(room);
     });
 });

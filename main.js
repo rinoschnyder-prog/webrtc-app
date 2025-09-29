@@ -19,12 +19,9 @@ const servers = {
     ]
 };
 
-// 安全にメッセージを送信するヘルパー関数
 function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
-    } else {
-        console.warn('WebSocket is not open. Message not sent:', message);
     }
 }
 
@@ -41,6 +38,7 @@ window.addEventListener('load', () => {
     const room = new URL(window.location.href).searchParams.get('room');
     if (room) startCall();
 });
+
 async function startCall() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -54,15 +52,18 @@ async function startCall() {
         toggleVideo(true);
         connectWebSocket();
     } catch (e) {
-        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
-            alert('カメラとマイクへのアクセスがブロックされました。ブラウザの設定を確認してください。');
-        } else {
-            alert(`カメラの起動に失敗しました: ${e.name}`);
-        }
+        alert(`カメラの起動に失敗しました: ${e.name}`);
     }
 }
+
 let isCallInProgress = false;
-function handleCallButtonClick() { if (isCallInProgress) { hangup(); } else { call(); } }
+function handleCallButtonClick() {
+    if (isCallInProgress) {
+        hangup();
+    } else {
+        call();
+    }
+}
 
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
@@ -70,13 +71,9 @@ function connectWebSocket() {
     const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
 
-    // ▼▼▼ 変更: WebSocketが開いた後に全ての処理を開始する ▼▼▼
     socket.onopen = () => {
-        console.log('WebSocket connected. Peer Connection will be initialized.');
-        // WebSocketが開通してからPeerConnectionを準備する
-        createPeerConnection();
-
-        // ボタンを有効化
+        console.log('WebSocket connected.');
+        createPeerConnection(); // 接続が確立したらすぐにPeerConnectionを準備
         callButton.disabled = false;
         micButton.disabled = false;
         videoButton.disabled = false;
@@ -85,8 +82,10 @@ function connectWebSocket() {
     socket.onmessage = async (event) => {
         try {
             const message = JSON.parse(event.data);
-            if (message.offer) {
-                // createPeerConnectionはonopenで呼ばれているので不要
+            if (message.type === 'ready') {
+                console.log('Received ready signal. Initiating call.');
+                call();
+            } else if (message.offer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                 for (const candidate of remoteCandidatesQueue) { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
                 remoteCandidatesQueue = [];
@@ -107,41 +106,48 @@ function connectWebSocket() {
                 }
             } else if (message.type === 'count') {
                 participantInfo.textContent = `参加人数: ${message.count}人`;
-                // 2人目が参加したら、自動的にcallを開始する（先にいた人）
-                if (message.count === 2 && !isCallInProgress) {
-                    console.log("Second user joined. Initiating call.");
-                    call();
-                }
+            } else if (message.type === 'hangup') {
+                console.log('Peer has hung up.');
+                resetCallState();
             }
         } catch (e) { console.error('Error handling message:', e); }
+    };
+    
+    socket.onclose = () => {
+        console.log('WebSocket disconnected.');
+        resetCallState();
+        // ボタンを無効化
+        callButton.disabled = true;
+        micButton.disabled = true;
+        videoButton.disabled = true;
     };
 }
 
 function createPeerConnection() {
-    if (pc) return; // すでに作成済みの場合は何もしない
+    if (pc) {
+        pc.close();
+    }
     pc = new RTCPeerConnection(servers);
-    pc.oniceconnectionstatechange = () => { 
-        console.log(`ICE connection state change: ${pc.iceConnectionState}`); 
-        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') { 
-            isCallInProgress = true; 
-            updateCallButton(true); 
-        } 
+    pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state change: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            isCallInProgress = true;
+            updateCallButton(true);
+        }
     };
-    pc.onicecandidate = event => { 
-        if (event.candidate) { 
-            sendMessage({ candidate: event.candidate }); 
-        } 
+    pc.onicecandidate = event => {
+        if (event.candidate) {
+            sendMessage({ candidate: event.candidate });
+        }
     };
     pc.ontrack = event => { remoteVideo.srcObject = event.streams[0]; };
-    if (localStream) { localStream.getTracks().forEach(track => pc.addTrack(track, localStream)); }
+    if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
 }
 
 async function call() {
-    // createPeerConnectionはすでに呼ばれている前提
-    if (!pc) {
-        console.error("PeerConnection not initialized yet.");
-        return;
-    }
+    if (!pc) return;
     console.log("Creating offer...");
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -151,18 +157,21 @@ async function call() {
 }
 
 function hangup() {
-    if (socket) {
-        socket.close();
-        socket = null;
-    }
-    if (pc) { 
-        pc.close(); 
-        pc = null; 
-    }
+    sendMessage({ type: 'hangup' });
+    resetCallState();
+}
+
+// ▼▼▼ 変更: 状態をリセットするための新しい関数 ▼▼▼
+function resetCallState() {
     isCallInProgress = false;
-    updateCallButton(false);
+    if (pc) {
+        pc.close();
+        pc = null;
+    }
     remoteVideo.srcObject = null;
-    remoteCandidatesQueue = [];
+    updateCallButton(false);
+    // 次の通話に備えてPeerConnectionを再作成
+    createPeerConnection();
 }
 
 function updateCallButton(isInProgress) {
@@ -178,6 +187,7 @@ function updateCallButton(isInProgress) {
         label.textContent = '通話開始';
     }
 }
+
 function toggleMic(isInitial = false) {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -196,6 +206,7 @@ function toggleMic(isInitial = false) {
         }
     }
 }
+
 function toggleVideo(isInitial = false) {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];

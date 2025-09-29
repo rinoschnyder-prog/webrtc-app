@@ -12,14 +12,18 @@ app.use(express.static(__dirname));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ▼▼▼ 追加: 参加人数をルーム内の全員に通知する関数 ▼▼▼
-function broadcastParticipantCount(room) {
-    const clientsInRoom = [];
+function getClientsInRoom(room) {
+    const clients = [];
     wss.clients.forEach(client => {
         if (client.room === room && client.readyState === 1) {
-            clientsInRoom.push(client);
+            clients.push(client);
         }
     });
+    return clients;
+}
+
+function broadcastParticipantCount(room) {
+    const clientsInRoom = getClientsInRoom(room);
     const count = clientsInRoom.length;
     const message = JSON.stringify({ type: 'count', count: count });
     
@@ -39,13 +43,27 @@ wss.on('connection', (ws, req) => {
   ws.room = room;
   console.log(`クライアントがルームに参加しました: ${room}`);
 
-  // ▼▼▼ 変更: 新しい参加者が来たら人数を全員に通知 ▼▼▼
+  // ▼▼▼ 変更: 接続ロジックを修正 ▼▼▼
+  const clientsInRoom = getClientsInRoom(room);
+  
+  // もし部屋にすでに誰かいる場合 (つまり、自分が2人目の場合)
+  if (clientsInRoom.length > 1) {
+    // 部屋にいる他のクライアント（先にいた人）にだけ通話開始の合図を送る
+    clientsInRoom.forEach(client => {
+      if (client !== ws) {
+        client.send(JSON.stringify({ type: 'ready' }));
+      }
+    });
+  }
+
+  // 参加人数の更新は全員に通知
   broadcastParticipantCount(room);
 
   ws.on('message', message => {
     const messageString = message.toString();
-    wss.clients.forEach(client => {
-      if (client !== ws && client.room === ws.room && client.readyState === 1) {
+    // 他のクライアントにメッセージを転送
+    getClientsInRoom(room).forEach(client => {
+      if (client !== ws) {
         client.send(messageString);
       }
     });
@@ -53,7 +71,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     console.log(`クライアントがルームから退出しました: ${room}`);
-    // ▼▼▼ 変更: 参加者が退出したら人数を全員に通知 ▼▼▼
+    // 退出後、残っている人に人数を通知
     broadcastParticipantCount(room);
   });
 });

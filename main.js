@@ -76,6 +76,7 @@ async function startCallPreparation() {
         
         if (isAppleDevice) {
             recordButton.style.display = 'none';
+            settingsButton.style.display = 'none';
         }
 
         toggleMic(true);

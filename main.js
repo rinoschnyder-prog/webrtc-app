@@ -177,25 +177,55 @@ function createPeerConnection() {
     if (pc) pc.close();
     pc = new RTCPeerConnection(servers);
     
+    // ▼▼▼ 修正箇所 ▼▼▼
+    let disconnectTimeout; // タイムアウト処理を管理するための変数を追加
+
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
         switch(pc.iceConnectionState) {
             case 'connected':
             case 'completed':
+                // 接続が回復したら、タイムアウト処理をキャンセル
+                if (disconnectTimeout) {
+                    clearTimeout(disconnectTimeout);
+                    disconnectTimeout = null;
+                    console.log('ICE connection reconnected.');
+                }
                 isCallInProgress = true;
                 updateCallButton(true);
                 callButton.disabled = false;
                 checkAndEnableRecording();
                 break;
             case 'disconnected':
+                // 接続が不安定になった場合、5秒間だけ様子を見る
+                console.warn('ICE connection disconnected. Waiting for reconnection...');
+                if (!disconnectTimeout) {
+                    disconnectTimeout = setTimeout(() => {
+                        if (pc && pc.iceConnectionState === 'disconnected') {
+                            console.error('ICE connection failed to reconnect after 5 seconds.');
+                            if (isCallInProgress) {
+                                hangup(); // 相手にも終了を通知し、通話を終了
+                            }
+                        }
+                    }, 5000); // 5秒待つ
+                }
+                break;
             case 'failed':
+                // 接続に失敗した場合は、即座に通話を終了
+                console.error('ICE connection failed.');
+                if (isCallInProgress) {
+                    hangup(); // 相手にも終了を通知し、通話を終了
+                }
+                break;
             case 'closed':
+                // 接続が閉じた場合
                 if (isCallInProgress) {
                     resetCallState();
                 }
                 break;
         }
     };
+    // ▲▲▲ 修正箇所 ▲▲▲
 
     pc.onicecandidate = event => {
         if (event.candidate) sendMessage({ candidate: event.candidate });

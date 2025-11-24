@@ -207,7 +207,7 @@ function createPeerConnection() {
                                 hangup(); // 相手にも終了を通知し、通話を終了
                             }
                         }
-                    }, 5000); // 5秒待つ
+                    }, 10000); // 10秒待つ
                 }
                 break;
             case 'failed':

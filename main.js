@@ -1,4 +1,3 @@
-// main.js の全体をこれで置き換えてください
 'use strict';
 // --- DOM要素の取得 ---
 const createRoomButton = document.getElementById('createRoomButton');

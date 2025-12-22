@@ -1,11 +1,13 @@
 'use strict';
-// --- DOM要素の取得 ---
+
+// --- DOM要素 ---
 const createRoomButton = document.getElementById('createRoomButton');
 const callButton = document.getElementById('callButton');
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 const micButton = document.getElementById('micButton');
 const videoButton = document.getElementById('videoButton');
+const zoomButton = document.getElementById('zoomButton');
 const recordButton = document.getElementById('recordButton');
 const initialView = document.getElementById('initial-view');
 const controls = document.getElementById('controls');
@@ -17,7 +19,7 @@ const settingsPanel = document.getElementById('settingsPanel');
 const frameRateSelect = document.getElementById('frameRateSelect');
 const audioQualitySelect = document.getElementById('audioQualitySelect');
 const loadingOverlay = document.getElementById('loading-overlay');
-const loadingText = document.getElementById('loading-text');
+const copyLinkButton = document.getElementById('copyLinkButton');
 
 // --- グローバル変数 ---
 let localStream, pc, socket;
@@ -25,9 +27,10 @@ let isNegotiating = false;
 let isCallInProgress = false;
 let isRemoteVideoReady = false;
 let animationFrameId;
+let remoteCandidatesQueue = [];
+let currentZoom = 1; // ズーム状態 (1.0, 1.5, 2.0)
 const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
-// 録画関連の変数
 let mediaRecorder;
 let recordedChunks = [];
 let isRecording = false;
@@ -40,38 +43,42 @@ const servers = {
     ]
 };
 
-// --- イベントリスナー ---
+// --- イベント登録 ---
 createRoomButton.addEventListener('click', createNewRoom);
 callButton.addEventListener('click', handleCallButtonClick);
 micButton.addEventListener('click', () => toggleMic());
 videoButton.addEventListener('click', () => toggleVideo());
+zoomButton.addEventListener('click', () => toggleZoom());
 recordButton.addEventListener('click', () => toggleRecording());
 settingsButton.addEventListener('click', () => {
     settingsPanel.style.display = (settingsPanel.style.display === 'flex') ? 'none' : 'flex';
+});
+copyLinkButton.addEventListener('click', () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+        alert('招待リンクをコピーしました！相手に送ってください。');
+    });
 });
 
 async function startCallPreparation() {
     try {
         loadingOverlay.style.display = 'flex';
-
         const selectedFrameRate = parseInt(frameRateSelect.value, 10);
         const constraints = {
             audio: true,
-            video: {
-                frameRate: { ideal: selectedFrameRate }
-            }
+            video: { frameRate: { ideal: selectedFrameRate } }
         };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localVideo.srcObject = localStream;
 
-        localVideo.srcObject = stream;
-        localStream = stream;
         initialView.style.display = 'none';
         remoteVideo.style.display = 'block';
         controls.style.display = 'flex';
-        participantInfo.style.display = 'block';
+        document.getElementById('room-info').style.display = 'flex';
+        
         micButton.disabled = false;
         videoButton.disabled = false;
         settingsButton.disabled = false;
+        zoomButton.disabled = false;
         
         if (isAppleDevice) {
             recordButton.style.display = 'none';
@@ -82,308 +89,232 @@ async function startCallPreparation() {
         toggleVideo(true);
         connectWebSocket();
     } catch (e) {
-        alert(`カメラまたはマイクの起動に失敗しました: ${e.name}\n\nブラウザの設定でカメラとマイクへのアクセスを許可してください。`);
+        alert('カメラ/マイクの起動に失敗しました。');
         loadingOverlay.style.display = 'none';
     }
 }
 
 function connectWebSocket() {
     const room = new URL(window.location.href).searchParams.get('room');
-    const wsProtocol = 'wss:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/?room=${room}`;
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/?room=${room}`;
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
-        console.log('WebSocket connected.');
         loadingOverlay.style.display = 'none';
         createPeerConnection();
     };
 
     socket.onmessage = async (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            console.log('Received message:', message);
-            if (message.type === 'room-full') {
-                alert('この通話ルームは満室です（最大2名）。\nトップページに戻ります。');
-                window.location.href = '/';
-                return;
-            }
-            if (message.type === 'create-offer') {
-                call();
-            } else if (message.type === 'peer-joined') {
-                console.log('Peer joined, waiting for offer.');
-                callButton.disabled = false;
-            } else if (message.offer) {
-                if (isNegotiating || pc.signalingState !== 'stable') return;
-                isNegotiating = true;
-                await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                sendMessage({ answer: pc.localDescription });
-                isNegotiating = false;
-            } else if (message.answer) {
-                if (pc.signalingState === 'have-local-offer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
-                }
-            } else if (message.candidate) {
-                try {
-                    await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
-                } catch (e) {
-                    if (pc.remoteDescription) console.error('Error adding received ice candidate', e);
-                }
-            } else if (message.type === 'count') {
-                const count = message.count;
-                participantInfo.textContent = `参加人数: ${count}人`;
-                if (!isCallInProgress) {
-                    callButton.disabled = (count <= 1);
-                }
-            } else if (message.type === 'hangup') {
-                resetCallState();
-            }
-        } catch (e) {
-            console.error('Error handling message:', e);
+        const message = JSON.parse(event.data);
+        if (message.type === 'room-full') {
+            alert('満室です。');
+            window.location.href = '/';
+            return;
+        }
+        if (message.type === 'create-offer') {
+            call();
+        } else if (message.type === 'peer-joined') {
+            callButton.disabled = false;
+        } else if (message.offer) {
+            await handleOffer(message.offer);
+        } else if (message.answer) {
+            await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+        } else if (message.candidate) {
+            handleCandidate(message.candidate);
+        } else if (message.type === 'count') {
+            participantInfo.textContent = `参加人数: ${message.count}人`;
+            if (!isCallInProgress) callButton.disabled = (message.count <= 1);
+        } else if (message.type === 'hangup') {
+            resetCallState();
         }
     };
     
     socket.onclose = () => {
-        console.log('WebSocket disconnected.');
-        if (loadingOverlay.style.display !== 'none') {
-            loadingText.textContent = 'サーバーへの接続に失敗しました';
-            alert('サーバーに接続できませんでした。ページを再読み込みするか、後でもう一度お試しください。');
-        }
         resetCallState();
-        callButton.disabled = true;
-        micButton.disabled = true;
-        videoButton.disabled = true;
-        recordButton.disabled = true;
-        settingsButton.disabled = true;
-        if (isRecording) {
-            toggleRecording();
-        }
+        zoomButton.disabled = true;
     };
 }
 
-function checkAndEnableRecording() {
-    if (isCallInProgress && isRemoteVideoReady) {
-        if (!isAppleDevice) {
-            recordButton.disabled = false;
-            console.log('Recording is now possible.');
-        }
+async function handleOffer(offer) {
+    if (isNegotiating) return;
+    isNegotiating = true;
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    sendMessage({ answer: pc.localDescription });
+    remoteCandidatesQueue.forEach(candidate => pc.addIceCandidate(candidate));
+    remoteCandidatesQueue = [];
+    isNegotiating = false;
+}
+
+function handleCandidate(candidateData) {
+    const candidate = new RTCIceCandidate(candidateData);
+    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        pc.addIceCandidate(candidate);
+    } else {
+        remoteCandidatesQueue.push(candidate);
     }
 }
 
 function createPeerConnection() {
     if (pc) pc.close();
     pc = new RTCPeerConnection(servers);
-    
-    // ▼▼▼ 修正箇所 ▼▼▼
-    let disconnectTimeout; // タイムアウト処理を管理するための変数を追加
+    let disconnectTimeout;
 
     pc.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state changed to: ${pc.iceConnectionState}`);
-        switch(pc.iceConnectionState) {
-            case 'connected':
-            case 'completed':
-                // 接続が回復したら、タイムアウト処理をキャンセル
-                if (disconnectTimeout) {
-                    clearTimeout(disconnectTimeout);
-                    disconnectTimeout = null;
-                    console.log('ICE connection reconnected.');
-                }
-                isCallInProgress = true;
-                updateCallButton(true);
-                callButton.disabled = false;
-                checkAndEnableRecording();
-                break;
-            case 'disconnected':
-                // 接続が不安定になった場合、5秒間だけ様子を見る
-                console.warn('ICE connection disconnected. Waiting for reconnection...');
-                if (!disconnectTimeout) {
-                    disconnectTimeout = setTimeout(() => {
-                        if (pc && pc.iceConnectionState === 'disconnected') {
-                            console.error('ICE connection failed to reconnect after 5 seconds.');
-                            if (isCallInProgress) {
-                                hangup(); // 相手にも終了を通知し、通話を終了
-                            }
-                        }
-                    }, 10000); // 10秒待つ
-                }
-                break;
-            case 'failed':
-                // 接続に失敗した場合は、即座に通話を終了
-                console.error('ICE connection failed.');
-                if (isCallInProgress) {
-                    hangup(); // 相手にも終了を通知し、通話を終了
-                }
-                break;
-            case 'closed':
-                // 接続が閉じた場合
-                if (isCallInProgress) {
-                    resetCallState();
-                }
-                break;
+        if (pc.iceConnectionState === 'connected') {
+            if (disconnectTimeout) clearTimeout(disconnectTimeout);
+            isCallInProgress = true;
+            updateCallButton(true);
+            callButton.disabled = false;
+        } else if (pc.iceConnectionState === 'disconnected') {
+            disconnectTimeout = setTimeout(() => {
+                if (pc.iceConnectionState === 'disconnected') hangup();
+            }, 10000);
         }
     };
-    // ▲▲▲ 修正箇所 ▲▲▲
 
     pc.onicecandidate = event => {
         if (event.candidate) sendMessage({ candidate: event.candidate });
     };
 
     pc.ontrack = event => {
-        if (remoteVideo.srcObject !== event.streams[0]) {
-            const remoteStream = event.streams[0];
-            remoteVideo.srcObject = remoteStream;
-            isRemoteVideoReady = false;
-            recordButton.disabled = true;
-
-            remoteVideo.onloadedmetadata = () => {
-                console.log('Remote video metadata loaded.');
-                isRemoteVideoReady = true;
-                checkAndEnableRecording();
-            };
-
-            remoteVideo.play().catch(e => console.error('Remote video play failed:', e));
-        }
+        remoteVideo.srcObject = event.streams[0];
+        remoteVideo.onloadedmetadata = () => {
+            isRemoteVideoReady = true;
+            if (!isAppleDevice) recordButton.disabled = false;
+        };
     };
     
-    if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-}
-
-function toggleRecording() {
-    if (!isRecording) {
-        if (!isCallInProgress || !isRemoteVideoReady || remoteVideo.videoWidth === 0) {
-            alert('相手の映像が完全に表示されてから、もう一度お試しください。');
-            return;
-        }
-
-        try {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const localAudioSource = audioContext.createMediaStreamSource(localStream);
-            const remoteAudioSource = audioContext.createMediaStreamSource(remoteVideo.srcObject);
-            mixedStreamDestination = audioContext.createMediaStreamDestination();
-            localAudioSource.connect(mixedStreamDestination);
-            remoteAudioSource.connect(mixedStreamDestination);
-            const mixedAudioTrack = mixedStreamDestination.stream.getAudioTracks()[0];
-
-            animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
-            const canvasStream = recordingCanvas.captureStream(30);
-            const canvasVideoTrack = canvasStream.getVideoTracks()[0];
-
-            const streamToRecord = new MediaStream([canvasVideoTrack, mixedAudioTrack]);
-            
-            const selectedAudioBitrate = parseInt(audioQualitySelect.value, 10);
-            const recorderOptions = {
-                mimeType: 'video/webm; codecs=vp8,opus',
-                audioBitsPerSecond: selectedAudioBitrate
-            };
-            
-            recordedChunks = [];
-            mediaRecorder = new MediaRecorder(streamToRecord, recorderOptions);
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    recordedChunks.push(event.data);
-                }
-            };
-
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `webrtc_call_recording_${new Date().toISOString()}.webm`;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 100);
-                recordedChunks = [];
-            };
-
-            mediaRecorder.start(1000);
-            isRecording = true;
-            settingsPanel.style.display = 'none';
-            recordButton.classList.add('recording');
-            recordButton.querySelector('.label').textContent = '録画停止';
-            recordButton.querySelector('.icon').textContent = '⏹️';
-            console.log('合成映像の録画を開始しました。');
-
-        } catch (e) {
-            console.error('録画の開始に失敗しました:', e);
-            alert('録画の開始に失敗しました。詳細はコンソールを確認してください。');
-        }
-
-    } else {
-        if (mediaRecorder) { mediaRecorder.stop(); }
-        if (audioContext) { audioContext.close(); }
-        if (animationFrameId) { cancelAnimationFrame(animationFrameId); }
-        isRecording = false;
-        recordButton.classList.remove('recording');
-        recordButton.querySelector('.label').textContent = '録画';
-        recordButton.querySelector('.icon').textContent = '⏺️';
-        console.log('合成映像の録画を停止しました。');
-    }
-}
-
-function drawVideosOnCanvas() {
-    if (!isRecording) return;
-    recordingCanvas.width = remoteVideo.videoWidth;
-    recordingCanvas.height = remoteVideo.videoHeight;
-    canvasContext.drawImage(remoteVideo, 0, 0, recordingCanvas.width, recordingCanvas.height);
-    const localVideoWidth = recordingCanvas.width * 0.25;
-    const localVideoHeight = localVideo.videoHeight * (localVideoWidth / localVideo.videoWidth);
-    const margin = 20;
-    const x = recordingCanvas.width - localVideoWidth - margin;
-    const y = recordingCanvas.height - localVideoHeight - margin;
-    canvasContext.drawImage(localVideo, x, y, localVideoWidth, localVideoHeight);
-    animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
-}
-
-function sendMessage(message) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(message));
-        console.log('Sent message:', message);
-    }
-}
-
-function createNewRoom() {
-    const newRoomId = uuid.v4();
-    window.location.href = `/?room=${newRoomId}`;
-}
-
-window.addEventListener('load', () => {
-    const room = new URL(window.location.href).searchParams.get('room');
-    if (room) {
-        startCallPreparation();
-    }
-});
-
-function handleCallButtonClick() {
-    if (isCallInProgress) {
-        hangup();
-    } else {
-        console.log('Requesting to start a new call...');
-        sendMessage({ type: 'request-to-call' });
-    }
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 }
 
 async function call() {
-    if (!pc || isNegotiating || isCallInProgress) return;
+    if (isNegotiating) return;
+    isNegotiating = true;
     try {
-        isNegotiating = true;
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendMessage({ offer: pc.localDescription });
-    } catch(e) {
-      console.error("Failed to create offer:", e);
+    } catch (e) {
+        console.error(e);
     } finally {
         isNegotiating = false;
     }
+}
+
+// --- ズーム機能 ---
+function toggleZoom() {
+    if (currentZoom === 1) currentZoom = 1.5;
+    else if (currentZoom === 1.5) currentZoom = 2;
+    else currentZoom = 1;
+    
+    remoteVideo.style.transform = `scale(${currentZoom})`;
+    zoomButton.querySelector('.label').textContent = `ズーム x${currentZoom}`;
+}
+
+// --- 録画機能 ---
+function toggleRecording() {
+    if (!isRecording) startRecording();
+    else stopRecording();
+}
+
+async function startRecording() {
+    if (!isRemoteVideoReady || remoteVideo.videoWidth === 0) {
+        alert('映像の準備ができるまでお待ちください。');
+        return;
+    }
+    try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        await audioContext.resume();
+        const localSource = audioContext.createMediaStreamSource(localStream);
+        const remoteSource = audioContext.createMediaStreamSource(remoteVideo.srcObject);
+        mixedStreamDestination = audioContext.createMediaStreamDestination();
+        localSource.connect(mixedStreamDestination);
+        remoteSource.connect(mixedStreamDestination);
+
+        animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
+        const canvasStream = recordingCanvas.captureStream(30);
+        const streamToRecord = new MediaStream([
+            canvasStream.getVideoTracks()[0],
+            mixedStreamDestination.stream.getAudioTracks()[0]
+        ]);
+        
+        const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp8,opus') 
+                         ? 'video/webm; codecs=vp8,opus' : 'video/webm';
+
+        mediaRecorder = new MediaRecorder(streamToRecord, {
+            mimeType,
+            audioBitsPerSecond: parseInt(audioQualitySelect.value, 10)
+        });
+
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = saveRecording;
+        
+        mediaRecorder.start(1000);
+        isRecording = true;
+        recordButton.classList.add('recording');
+        recordButton.querySelector('.label').textContent = '録画停止';
+    } catch (e) {
+        alert('録画に失敗しました。');
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder) mediaRecorder.stop();
+    if (audioContext) audioContext.close();
+    cancelAnimationFrame(animationFrameId);
+    isRecording = false;
+    recordButton.classList.remove('recording');
+    recordButton.querySelector('.label').textContent = '録画';
+}
+
+function saveRecording() {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-record-${Date.now()}.webm`;
+    a.click();
+    recordedChunks = [];
+}
+
+// 録画用Canvas描画（ズームを計算に含める）
+function drawVideosOnCanvas() {
+    if (!isRecording) return;
+    
+    recordingCanvas.width = remoteVideo.videoWidth;
+    recordingCanvas.height = remoteVideo.videoHeight;
+
+    // ズームに応じた切り取り範囲の計算
+    const sw = remoteVideo.videoWidth / currentZoom;
+    const sh = remoteVideo.videoHeight / currentZoom;
+    const sx = (remoteVideo.videoWidth - sw) / 2;
+    const sy = (remoteVideo.videoHeight - sh) / 2;
+
+    // ズームした状態で描画
+    canvasContext.drawImage(remoteVideo, sx, sy, sw, sh, 0, 0, recordingCanvas.width, recordingCanvas.height);
+    
+    // 自分のカメラ
+    const localW = recordingCanvas.width * 0.25;
+    const localH = localVideo.videoHeight * (localW / localVideo.videoWidth);
+    canvasContext.drawImage(localVideo, recordingCanvas.width - localW - 20, recordingCanvas.height - localH - 20, localW, localH);
+    
+    animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
+}
+
+// --- 共通 ---
+function sendMessage(msg) {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
+}
+
+function createNewRoom() {
+    window.location.href = `/?room=${uuid.v4()}`;
+}
+
+function handleCallButtonClick() {
+    if (isCallInProgress) hangup();
+    else sendMessage({ type: 'request-to-call' });
 }
 
 function hangup() {
@@ -392,75 +323,42 @@ function hangup() {
 }
 
 function resetCallState() {
-    console.log("Resetting call state.");
     isCallInProgress = false;
-    isNegotiating = false;
     isRemoteVideoReady = false;
-    if (pc) {
-        pc.close();
-        pc = null;
-    }
+    remoteCandidatesQueue = [];
+    currentZoom = 1;
+    remoteVideo.style.transform = `scale(1)`;
+    zoomButton.querySelector('.label').textContent = 'ズーム';
+    
+    if (pc) { pc.close(); pc = null; }
     remoteVideo.srcObject = null;
     updateCallButton(false);
-    const participantCount = parseInt(participantInfo.textContent.replace(/[^0-9]/g, ''), 10);
-    callButton.disabled = (participantCount <= 1);
     recordButton.disabled = true;
-    if (isRecording) {
-        toggleRecording();
-    }
-    if (localStream) {
-        createPeerConnection();
-    }
+    if (isRecording) stopRecording();
+    createPeerConnection();
 }
 
-function updateCallButton(isInProgress) {
-    const label = callButton.querySelector('.label');
-    const icon = callButton.querySelector('.icon');
-    if (isInProgress) {
-        callButton.classList.add('hangup');
-        icon.textContent = '📞';
-        label.textContent = '通話終了';
-    } else {
-        callButton.classList.remove('hangup');
-        icon.textContent = '📞';
-        label.textContent = '通話開始';
-    }
+function updateCallButton(active) {
+    callButton.classList.toggle('hangup', active);
+    callButton.querySelector('.label').textContent = active ? '通話終了' : '通話開始';
 }
 
-function toggleMic(isInitial = false) {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    const icon = micButton.querySelector('.icon');
-    const label = micButton.querySelector('.label');
-    if (audioTrack) {
-        if (!isInitial) audioTrack.enabled = !audioTrack.enabled;
-        if (audioTrack.enabled) {
-            icon.textContent = '🎤';
-            label.textContent = 'ミュート';
-            micButton.style.backgroundColor = '#3c4043';
-        } else {
-            icon.textContent = '🔇';
-            label.textContent = 'ミュート解除';
-            micButton.style.backgroundColor = '#ea4335';
-        }
-    }
+function toggleMic(initial = false) {
+    const track = localStream.getAudioTracks()[0];
+    if (!track) return;
+    if (!initial) track.enabled = !track.enabled;
+    micButton.querySelector('.icon').textContent = track.enabled ? '🎤' : '🔇';
+    micButton.style.backgroundColor = track.enabled ? '#3c4043' : '#ea4335';
 }
 
-function toggleVideo(isInitial = false) {
-    if (!localStream) return;
-    const videoTrack = localStream.getVideoTracks()[0];
-    const icon = videoButton.querySelector('.icon');
-    const label = videoButton.querySelector('.label');
-    if (videoTrack) {
-        if (!isInitial) videoTrack.enabled = !videoTrack.enabled;
-        if (videoTrack.enabled) {
-            icon.textContent = '📹';
-            label.textContent = 'ビデオ停止';
-            videoButton.style.backgroundColor = '#3c4043';
-        } else {
-            icon.textContent = '🚫';
-            label.textContent = 'ビデオ開始';
-            videoButton.style.backgroundColor = '#ea4335';
-        }
-    }
+function toggleVideo(initial = false) {
+    const track = localStream.getVideoTracks()[0];
+    if (!track) return;
+    if (!initial) track.enabled = !track.enabled;
+    videoButton.querySelector('.icon').textContent = track.enabled ? '📹' : '🚫';
+    videoButton.style.backgroundColor = track.enabled ? '#3c4043' : '#ea4335';
 }
+
+window.addEventListener('load', () => {
+    if (new URL(window.location.href).searchParams.get('room')) startCallPreparation();
+});

@@ -21,6 +21,13 @@ const audioQualitySelect = document.getElementById('audioQualitySelect');
 const loadingOverlay = document.getElementById('loading-overlay');
 const copyLinkButton = document.getElementById('copyLinkButton');
 
+// 接続状態表示用
+const statusPanel = document.getElementById('status-panel');
+const bitrateVal = document.getElementById('bitrate-val');
+const latencyVal = document.getElementById('latency-val');
+const connectionQuality = document.getElementById('connection-quality');
+const signalIcon = document.getElementById('signal-icon');
+
 // --- グローバル変数 ---
 let localStream, pc, socket;
 let isNegotiating = false;
@@ -28,7 +35,9 @@ let isCallInProgress = false;
 let isRemoteVideoReady = false;
 let animationFrameId;
 let remoteCandidatesQueue = [];
-let currentZoom = 1; // ズーム状態 (1.0, 1.5, 2.0)
+let currentZoom = 1;
+let statsInterval; // 統計監視タイマー
+let lastBytesReceived = 0; // 通信速度計算用
 const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
 let mediaRecorder;
@@ -131,8 +140,57 @@ function connectWebSocket() {
     
     socket.onclose = () => {
         resetCallState();
-        zoomButton.disabled = true;
     };
+}
+
+// 接続状態を1秒ごとに取得
+function startStatsMonitoring() {
+    stopStatsMonitoring();
+    statusPanel.style.display = 'flex';
+    statsInterval = setInterval(async () => {
+        if (!pc) return;
+        const stats = await pc.getStats();
+        let bitrate = 0;
+        let latency = 0;
+
+        stats.forEach(report => {
+            // 受信ビットレートの計算 (下り速度)
+            if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                if (lastBytesReceived > 0) {
+                    bitrate = Math.round(((report.bytesReceived - lastBytesReceived) * 8) / 1000);
+                }
+                lastBytesReceived = report.bytesReceived;
+            }
+            // 遅延 (RTT: 往復時間) の取得
+            if (report.type === 'remote-candidate-pair' && report.currentRoundTripTime) {
+                latency = Math.round(report.currentRoundTripTime * 1000);
+            }
+        });
+
+        bitrateVal.textContent = bitrate;
+        latencyVal.textContent = latency;
+
+        // 品質の判定
+        if (bitrate > 800 && latency < 100) {
+            connectionQuality.textContent = '良好';
+            connectionQuality.className = 'status-good';
+            signalIcon.textContent = '📶';
+        } else if (bitrate > 300 && latency < 300) {
+            connectionQuality.textContent = '普通';
+            connectionQuality.className = 'status-fair';
+            signalIcon.textContent = '⚠️';
+        } else {
+            connectionQuality.textContent = '不安定';
+            connectionQuality.className = 'status-poor';
+            signalIcon.textContent = '❗';
+        }
+    }, 1000);
+}
+
+function stopStatsMonitoring() {
+    if (statsInterval) clearInterval(statsInterval);
+    statusPanel.style.display = 'none';
+    lastBytesReceived = 0;
 }
 
 async function handleOffer(offer) {
@@ -162,12 +220,15 @@ function createPeerConnection() {
     let disconnectTimeout;
 
     pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === 'connected') {
+        console.log("ICE State:", pc.iceConnectionState);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             if (disconnectTimeout) clearTimeout(disconnectTimeout);
             isCallInProgress = true;
             updateCallButton(true);
             callButton.disabled = false;
+            startStatsMonitoring(); // 接続成功時に監視開始
         } else if (pc.iceConnectionState === 'disconnected') {
+            connectionQuality.textContent = '再接続中...';
             disconnectTimeout = setTimeout(() => {
                 if (pc.iceConnectionState === 'disconnected') hangup();
             }, 10000);
@@ -186,7 +247,14 @@ function createPeerConnection() {
         };
     };
     
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+        // カメラデバイス自体が停止した場合の検知
+        track.onended = () => {
+            alert('カメラまたはマイクの接続が切れました。デバイスを確認してください。');
+            hangup();
+        };
+    });
 }
 
 async function call() {
@@ -203,17 +271,14 @@ async function call() {
     }
 }
 
-// --- ズーム機能 ---
 function toggleZoom() {
     if (currentZoom === 1) currentZoom = 1.5;
     else if (currentZoom === 1.5) currentZoom = 2;
     else currentZoom = 1;
-    
     remoteVideo.style.transform = `scale(${currentZoom})`;
     zoomButton.querySelector('.label').textContent = `ズーム x${currentZoom}`;
 }
 
-// --- 録画機能 ---
 function toggleRecording() {
     if (!isRecording) startRecording();
     else stopRecording();
@@ -232,25 +297,20 @@ async function startRecording() {
         mixedStreamDestination = audioContext.createMediaStreamDestination();
         localSource.connect(mixedStreamDestination);
         remoteSource.connect(mixedStreamDestination);
-
         animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
         const canvasStream = recordingCanvas.captureStream(30);
         const streamToRecord = new MediaStream([
             canvasStream.getVideoTracks()[0],
             mixedStreamDestination.stream.getAudioTracks()[0]
         ]);
-        
         const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp8,opus') 
                          ? 'video/webm; codecs=vp8,opus' : 'video/webm';
-
         mediaRecorder = new MediaRecorder(streamToRecord, {
             mimeType,
             audioBitsPerSecond: parseInt(audioQualitySelect.value, 10)
         });
-
         mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
         mediaRecorder.onstop = saveRecording;
-        
         mediaRecorder.start(1000);
         isRecording = true;
         recordButton.classList.add('recording');
@@ -279,31 +339,21 @@ function saveRecording() {
     recordedChunks = [];
 }
 
-// 録画用Canvas描画（ズームを計算に含める）
 function drawVideosOnCanvas() {
     if (!isRecording) return;
-    
     recordingCanvas.width = remoteVideo.videoWidth;
     recordingCanvas.height = remoteVideo.videoHeight;
-
-    // ズームに応じた切り取り範囲の計算
     const sw = remoteVideo.videoWidth / currentZoom;
     const sh = remoteVideo.videoHeight / currentZoom;
     const sx = (remoteVideo.videoWidth - sw) / 2;
     const sy = (remoteVideo.videoHeight - sh) / 2;
-
-    // ズームした状態で描画
     canvasContext.drawImage(remoteVideo, sx, sy, sw, sh, 0, 0, recordingCanvas.width, recordingCanvas.height);
-    
-    // 自分のカメラ
     const localW = recordingCanvas.width * 0.25;
     const localH = localVideo.videoHeight * (localW / localVideo.videoWidth);
     canvasContext.drawImage(localVideo, recordingCanvas.width - localW - 20, recordingCanvas.height - localH - 20, localW, localH);
-    
     animationFrameId = requestAnimationFrame(drawVideosOnCanvas);
 }
 
-// --- 共通 ---
 function sendMessage(msg) {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
 }
@@ -323,13 +373,13 @@ function hangup() {
 }
 
 function resetCallState() {
+    stopStatsMonitoring();
     isCallInProgress = false;
     isRemoteVideoReady = false;
     remoteCandidatesQueue = [];
     currentZoom = 1;
     remoteVideo.style.transform = `scale(1)`;
     zoomButton.querySelector('.label').textContent = 'ズーム';
-    
     if (pc) { pc.close(); pc = null; }
     remoteVideo.srcObject = null;
     updateCallButton(false);
